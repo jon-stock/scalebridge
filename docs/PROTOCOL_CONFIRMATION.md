@@ -73,16 +73,18 @@ group policy"), so `dotnet build`/`dotnet publish` could never be run there dire
 no physical Android phone or Archonfit scale attached.
 
 The build instead runs on a GitHub Actions hosted runner (`.github/workflows/build-apk.yml`),
-which isn't subject to that policy - see `docs/SETUP.md`. That first real build caught (and this
-project has since fixed) two straightforward environment/versioning issues that had nothing to do
+which isn't subject to that policy - see `docs/SETUP.md`. Its first two real build attempts
+caught (and this project has since fixed) environment/versioning issues that had nothing to do
 with the protocol logic:
 
-- `TargetPlatformVersion` was set to `34`, but the Android workload that actually gets restored
-  for `net10.0-android` only ships platform packs `35.0`/`36.0` (34 was dropped). Fixed by setting
-  `TargetPlatformVersion` to `35.0` - this only affects the compile-time API surface, not the
-  app's real minimum supported OS version (`SupportedOSPlatformVersion`, still `26`).
-- The project originally targeted `net9.0-android`, which the workload now reports as out of
-  support. Moved to `net10.0-android` (matching the workflow's `actions/setup-dotnet` version).
+- The project originally targeted `net9.0-android`, which the workload reports as out of support.
+  Moved to `net10.0-android` (matching the workflow's `actions/setup-dotnet` version).
+- `TargetPlatformVersion` was pinned to `34`, then `35.0` after the first fix - but the set of
+  platform packs the Android workload actually ships moved twice within the same day (34 dropped,
+  then 35.0 dropped too, leaving only 36.0/36.1). Rather than chase that moving target, the
+  property is now omitted entirely so the SDK picks whichever platform pack is actually
+  installed. This only affects the compile-time API surface, not the app's real minimum
+  supported OS version (`SupportedOSPlatformVersion`, still `26`).
 
 Practically, confidence levels are now:
 

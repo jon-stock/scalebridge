@@ -12,13 +12,13 @@
     <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
 
     <!-- Health Connect is built-in on Android 14 (API 34) and available as a separate app back to
-         Android 9 (API 28). We target API 26+ at runtime but Health Connect itself needs 28+.
-         TargetPlatformVersion is the *compile-time* API level and must match a platform pack the
-         restored Android workload actually ships (net10.0-android's workload only ships 35.0/36.0
-         - API 34 was dropped) - it does not lower the app's actual minimum supported OS version,
-         which is controlled by SupportedOSPlatformVersion below. -->
+         Android 9 (API 28). We target API 26+ at runtime via SupportedOSPlatformVersion below.
+         TargetPlatformVersion (the *compile-time* API level) is deliberately left unset: the
+         Android workload's set of available platform packs has already shifted twice during
+         this project's early CI runs (34 dropped, then 35.0 dropped too, leaving only
+         36.0/36.1), so pinning a specific number is a losing game against a moving target -
+         omitting it lets the SDK pick whichever platform pack is actually installed. -->
     <SupportedOSPlatformVersion>26</SupportedOSPlatformVersion>
-    <TargetPlatformVersion>35.0</TargetPlatformVersion>
 
     <AndroidLinkMode>SdkOnly</AndroidLinkMode>
     <AndroidUseAapt2>true</AndroidUseAapt2>
