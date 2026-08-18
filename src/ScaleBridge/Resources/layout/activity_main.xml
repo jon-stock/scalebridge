@@ -33,6 +33,39 @@
                 android:layout_height="wrap_content" />
         </LinearLayout>
 
+        <!-- Last crash card - hidden unless ScaleBridgeApplication/CrashLog recorded one. -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardLastCrash"
+            style="@style/ScaleBridge.SectionCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone">
+            <LinearLayout
+                android:orientation="vertical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+                <TextView
+                    style="@style/ScaleBridge.SectionTitle"
+                    android:text="LAST CRASH"
+                    android:textColor="@color/brand_error" />
+                <TextView
+                    android:id="@+id/tvLastCrash"
+                    android:text=""
+                    android:textSize="12sp"
+                    android:textIsSelectable="true"
+                    android:fontFamily="monospace"
+                    android:textColor="@color/brand_text_primary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnClearCrash"
+                    style="@style/ScaleBridge.Button.Outlined"
+                    android:text="Clear"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
         <!-- Status card -->
         <com.google.android.material.card.MaterialCardView
             style="@style/ScaleBridge.SectionCard"

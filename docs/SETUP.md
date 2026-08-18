@@ -110,6 +110,14 @@ Before trusting the very first automatic sync, do the check described in
 `docs/PROTOCOL_CONFIRMATION.md` ("What still needs confirming on the real device") - it's a 5
 minute logcat check (`adb logcat -s ScaleBridge.Qn`), not a rebuild.
 
+## If the app crashes
+
+Open the app again - a "Last crash" card appears at the top of the screen if one was recorded,
+with the full exception text (long-press to select/copy it) and a "Clear" button. This works
+without `adb`, which is useful given this app is normally sideloaded onto a single personal phone.
+If you do have `adb` available, `adb logcat -s AndroidRuntime:E DEBUG:E` around the time of the
+crash is the equivalent view.
+
 ## Known limitation: reboot re-arming
 
 `Boot.BootCompletedReceiver` re-registers the scan filter after a reboot, but only takes effect

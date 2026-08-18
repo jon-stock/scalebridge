@@ -35,7 +35,7 @@ public static class SyncNotifier
         return new NotificationCompat.Builder(context, ChannelId)
             .SetContentTitle("ScaleBridge")
             .SetContentText(text)
-            .SetSmallIcon(Resource.Drawable.appicon)
+            .SetSmallIcon(Resource.Drawable.ic_notification)
             .SetOngoing(true)
             .SetPriority(NotificationCompat.PriorityLow)
             .Build();
@@ -47,7 +47,7 @@ public static class SyncNotifier
         var notification = new NotificationCompat.Builder(context, ChannelId)
             .SetContentTitle("ScaleBridge: weight synced")
             .SetContentText($"{weightKg:0.0} kg written to Health Connect at {whenLocal:t}")
-            .SetSmallIcon(Resource.Drawable.appicon)
+            .SetSmallIcon(Resource.Drawable.ic_notification)
             .SetAutoCancel(true)
             .Build();
 
@@ -60,7 +60,7 @@ public static class SyncNotifier
         var notification = new NotificationCompat.Builder(context, ChannelId)
             .SetContentTitle("ScaleBridge: sync failed")
             .SetContentText(message)
-            .SetSmallIcon(Resource.Drawable.appicon)
+            .SetSmallIcon(Resource.Drawable.ic_notification)
             .SetAutoCancel(true)
             .Build();
 

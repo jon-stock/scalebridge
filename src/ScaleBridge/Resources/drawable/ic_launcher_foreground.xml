@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simple, flat bathroom-scale glyph: a rounded platform with a circular digital display,
+     kept within the adaptive icon's ~66dp safe zone (centered in the 108x108 viewport) so it
+     isn't clipped by circular/squircle/rounded-square launcher masks. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+        android:width="108dp"
+        android:height="108dp"
+        android:viewportWidth="108"
+        android:viewportHeight="108">
+    <!-- Scale platform -->
+    <path android:fillColor="#FFFFFF"
+          android:pathData="M36,42 L72,42 A6,6 0 0 1 78,48 L78,68 A6,6 0 0 1 72,74 L36,74 A6,6 0 0 1 30,68 L30,48 A6,6 0 0 1 36,42 Z" />
+    <!-- Digital display -->
+    <path android:fillColor="#0B3D2E"
+          android:pathData="M47,50 A7,7 0 1 0 61,50 A7,7 0 1 0 47,50 Z" />
+    <!-- Little feet, for a touch of detail -->
+    <path android:fillColor="#FFFFFF" android:pathData="M33,74 L39,74 L39,78 L33,78 Z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M69,74 L75,74 L75,78 L69,78 Z" />
+</vector>

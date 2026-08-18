@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status bar / notification icon: Android renders only this shape's alpha channel (as a plain
+     white silhouette, tinted by the system), so unlike ic_launcher_foreground.xml every part
+     here is opaque white on transparent - color differences within the shape wouldn't be visible
+     anyway. Same scale glyph, simplified to one solid silhouette. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+        android:width="24dp"
+        android:height="24dp"
+        android:viewportWidth="108"
+        android:viewportHeight="108">
+    <path android:fillColor="#FFFFFF"
+          android:pathData="M36,42 L72,42 A6,6 0 0 1 78,48 L78,68 A6,6 0 0 1 72,74 L36,74 A6,6 0 0 1 30,68 L30,48 A6,6 0 0 1 36,42 Z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M33,74 L39,74 L39,78 L33,78 Z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M69,74 L75,74 L75,78 L69,78 Z" />
+</vector>

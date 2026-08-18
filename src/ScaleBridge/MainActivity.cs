@@ -3,6 +3,7 @@ using Android.Bluetooth;
 using Android.Bluetooth.LE;
 using Android.Content;
 using Android.OS;
+using Android.Views;
 using Android.Widget;
 using AndroidX.Activity;
 using AndroidX.Activity.Result;
@@ -38,6 +39,8 @@ public class MainActivity : ComponentActivity
     private ListView _lvDevices = null!;
     private EditText _etMac = null!;
     private EditText _etName = null!;
+    private View _cardLastCrash = null!;
+    private TextView _tvLastCrash = null!;
 
     private ScanCallback? _debugScanCallback;
     private readonly Dictionary<string, string> _seenDevices = new();
@@ -52,10 +55,22 @@ public class MainActivity : ComponentActivity
         base.OnCreate(savedInstanceState);
 
         // Must be registered before the activity reaches STARTED - i.e. here in OnCreate, not
-        // lazily when the button is tapped.
-        _healthPermissionLauncher = RegisterForActivityResult(
-            HealthConnectWriter.CreatePermissionRequestContract(),
-            new HealthPermissionResultCallback(this));
+        // lazily when the button is tapped. Wrapped defensively: this calls into genuinely new,
+        // never-run-on-a-device binding surface (see HealthConnectWriter.CreatePermissionRequestContract),
+        // and a crash here previously took the whole app down on every launch before this screen
+        // even rendered. If it fails, the button below degrades gracefully instead, and the
+        // failure is captured in the "Last crash" card via CrashLog.
+        try
+        {
+            _healthPermissionLauncher = RegisterForActivityResult(
+                HealthConnectWriter.CreatePermissionRequestContract(),
+                new HealthPermissionResultCallback(this));
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Record(this, ex);
+            _healthPermissionLauncher = null;
+        }
 
         SetContentView(Resource.Layout.activity_main);
 
@@ -66,6 +81,13 @@ public class MainActivity : ComponentActivity
         _lvDevices = FindViewById<ListView>(Resource.Id.lvDevices)!;
         _etMac = FindViewById<EditText>(Resource.Id.etMac)!;
         _etName = FindViewById<EditText>(Resource.Id.etName)!;
+        _cardLastCrash = FindViewById<View>(Resource.Id.cardLastCrash)!;
+        _tvLastCrash = FindViewById<TextView>(Resource.Id.tvLastCrash)!;
+        FindViewById<Button>(Resource.Id.btnClearCrash)!.Click += (_, _) =>
+        {
+            CrashLog.Clear(this);
+            RefreshStatus();
+        };
 
         _deviceListAdapter = new ArrayAdapter<string>(this, Resource.Layout.list_item_device, Resource.Id.tvDeviceRow, new List<string>());
         _lvDevices.Adapter = _deviceListAdapter;
@@ -92,6 +114,17 @@ public class MainActivity : ComponentActivity
 
     private void RefreshStatus()
     {
+        var lastCrash = CrashLog.LastCrashText(this);
+        if (lastCrash is not null)
+        {
+            _cardLastCrash.Visibility = ViewStates.Visible;
+            _tvLastCrash.Text = $"{CrashLog.LastCrashUtc(this)?.ToLocalTime():g}\n\n{lastCrash}";
+        }
+        else
+        {
+            _cardLastCrash.Visibility = ViewStates.Gone;
+        }
+
         bool configured = ScaleConfig.IsConfigured(this);
         bool hasPermissions = PermissionHelper.HasAllRequiredAndroidPermissions(this);
         bool healthConnectAvailable = HealthConnectWriter.IsAvailable(this);
@@ -150,10 +183,16 @@ public class MainActivity : ComponentActivity
             return;
         }
 
+        if (_healthPermissionLauncher is null)
+        {
+            Toast.MakeText(this, "Health Connect permission request isn't available on this build - see \"Last crash\" below for details.", ToastLength.Long)!.Show();
+            return;
+        }
+
         // Health Connect permissions are requested through Health Connect's own permission
         // screen via this ActivityResultContract - not a plain RequestPermissions call, which
         // silently does nothing on many devices/versions for this specific permission family.
-        _healthPermissionLauncher?.Launch(HealthConnectWriter.BuildRequiredPermissionSet());
+        _healthPermissionLauncher.Launch(HealthConnectWriter.BuildRequiredPermissionSet());
     }
 
     /// <summary>Called back (via <see cref="HealthPermissionResultCallback"/>) once the user returns from the Health Connect permission screen.</summary>

@@ -12,4 +12,6 @@
     <color name="brand_success">#2E7D32</color>
     <color name="brand_error">#C62828</color>
     <color name="brand_divider">#DDE5E3</color>
+
+    <color name="ic_launcher_background">#0B3D2E</color>
 </resources>

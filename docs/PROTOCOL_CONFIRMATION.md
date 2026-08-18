@@ -256,3 +256,37 @@ attribute. Android's build tooling auto-derives an implicit parent from everythi
 last dot in a style's name when `parent` is omitted (a real behaviour, not just a naming
 convention) - so it looked for a style literally named `ScaleBridge` and failed to link
 resources. Fixed by adding an explicit empty `parent=""` to both.
+
+## Crash on first launch, and defensive hardening
+
+Once that build succeeded and was installed on the real phone, the app crashed immediately on
+opening - before this session could see any logcat output (no `adb` access on the phone used for
+testing). Rather than guess a second time at exactly which of the two brand-new, never-run
+features caused it (the reflection-built Health Connect permission contract, or the newly-added
+Material Components widgets, which have their own well-known runtime check that the Activity's
+theme is actually a Material theme), this was addressed two ways at once:
+
+1. **A global crash handler** (`ScaleBridgeApplication.cs`, installed via `Application.OnCreate`,
+   which runs before any Activity's `OnCreate`) persists the full exception text via
+   `Status/CrashLog.cs`, and `MainActivity` shows it in a "Last crash" card (with selectable text,
+   so it can be copied) whenever one is present. This means any future crash - this one included,
+   if it recurs - is readable directly from the app, without needing `adb`.
+2. **The riskiest new call** (`RegisterForActivityResult(HealthConnectWriter.
+   CreatePermissionRequestContract(), ...)` in `MainActivity.OnCreate`) is now wrapped in a
+   try/catch. If it throws, the rest of the screen still loads normally and the Health Connect
+   permission button shows a clear message instead of taking the whole app down with it.
+
+This does not identify a single root cause with certainty (that requires seeing the actual
+crash text, which - per point 1 - should now be visible in the app itself after the next
+install), but it directly addresses the two most likely candidates and ensures the app is no
+longer a black box if something else was actually responsible.
+
+## Icon and notification icon
+
+Replaced the placeholder flat icon with a proper Android adaptive icon (`mipmap-anydpi-v26/
+ic_launcher.xml`): a dark green background (`#0B3D2E`) and a simple white bathroom-scale glyph
+(`drawable/ic_launcher_foreground.xml`) kept within the adaptive icon's safe zone so it isn't
+clipped by circular/squircle/rounded-square launcher masks. Added a separate, single-silhouette
+notification icon (`drawable/ic_notification.xml`): status bar icons render only their alpha
+channel (tinted by the system), so reusing the full-colour launcher icon there would have looked
+like a solid blob rather than a recognisable shape.
