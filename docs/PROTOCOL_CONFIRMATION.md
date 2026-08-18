@@ -65,25 +65,37 @@ Do this exactly as Prompt.md Section 3 describes, before trusting the first real
    `QNHandler.kt` already covers (it explicitly documents itself as covering several, but not
    guaranteed all, QN/Yolanda-chipset clones).
 
-## Build environment limitations (why there's no APK yet)
+## Build environment limitations
 
-This session could not compile or run any of this code:
+The machine this project was authored on has no JDK/Android SDK, and its Group Policy blocks the
+`android` .NET workload installer's `dotnet.exe` subprocess outright ("This program is blocked by
+group policy"), so `dotnet build`/`dotnet publish` could never be run there directly. It also has
+no physical Android phone or Archonfit scale attached.
 
-- No JDK or Android SDK is installed on this machine, and installing the `android` .NET workload
-  (which provisions both) failed with *"This program is blocked by group policy"* when it tried to
-  run an installer subprocess. `dotnet build` was therefore never attempted.
-- No physical Android phone or Archonfit scale is reachable from this environment.
+The build instead runs on a GitHub Actions hosted runner (`.github/workflows/build-apk.yml`),
+which isn't subject to that policy - see `docs/SETUP.md`. That first real build caught (and this
+project has since fixed) two straightforward environment/versioning issues that had nothing to do
+with the protocol logic:
 
-Practically, this means:
+- `TargetPlatformVersion` was set to `34`, but the Android workload that actually gets restored
+  for `net10.0-android` only ships platform packs `35.0`/`36.0` (34 was dropped). Fixed by setting
+  `TargetPlatformVersion` to `35.0` - this only affects the compile-time API surface, not the
+  app's real minimum supported OS version (`SupportedOSPlatformVersion`, still `26`).
+- The project originally targeted `net9.0-android`, which the workload now reports as out of
+  support. Moved to `net10.0-android` (matching the workflow's `actions/setup-dotnet` version).
 
-- **High confidence:** `QnFrameParser` (pure C#, no Android types, ported line-by-line from a
-  real, current, actively-maintained reference implementation) and the general BLE
-  scan/GATT/service structure (standard, long-established Android APIs).
-- **Needs verification on first real build:** the Health Connect write path in
+Practically, confidence levels are now:
+
+- **High confidence, and now compiling in CI:** `QnFrameParser` (pure C#, no Android types,
+  ported line-by-line from a real, current, actively-maintained reference implementation) and the
+  general BLE scan/GATT/service structure (standard, long-established Android APIs).
+- **Still needs verification on the next CI run:** the Health Connect write path in
   `src/ScaleBridge/Health/`. `androidx.health.connect:connect-client` is a Kotlin library whose
   `insertRecords(...)` call is a `suspend fun`; calling it from C#/Java interop requires bridging
   a `kotlin.coroutines.Continuation`, and the exact C# names the .NET binding generator produces
-  for that (and for the `Mass`/`WeightRecord`/`InsertRecordsResponse` types) could not be checked
-  against a real build. See the comments at the top of `HealthConnectWriter.cs` and
-  `KotlinContinuationBridge.cs`, and `docs/SETUP.md`'s "First build" section, for exactly what to
-  check and fix if `dotnet build` reports errors there.
+  for that (and for the `Mass`/`WeightRecord`/`InsertRecordsResponse` types) had not been checked
+  against a real build as of the first CI run. See the comments at the top of
+  `HealthConnectWriter.cs` and `KotlinContinuationBridge.cs` for exactly what to check and fix if
+  a future build reports errors there.
+- **Still unverified:** the actual GATT behaviour against the real Archonfit unit - no substitute
+  for the logcat check described above has been done yet.

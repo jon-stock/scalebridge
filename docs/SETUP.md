@@ -7,12 +7,23 @@ specific Archonfit BLE scale and writes each stable weight reading to Health Con
 Not on the Play Store, not for anyone else's device. See `Prompt.md` for the full brief and
 `docs/PROTOCOL_CONFIRMATION.md` for the protocol write-up.
 
-## Prerequisites (on the machine that builds the app - not the phone)
+## Building via CI (recommended)
 
-This project could not be built or tested in the environment that generated it (see "Build
-environment limitations" in `docs/PROTOCOL_CONFIRMATION.md`). To build it yourself:
+The machine this project was generated on has a Group Policy that blocks the Android workload
+installer's `dotnet.exe` subprocess, so it cannot build this app locally. `.github/workflows/
+build-apk.yml` builds it instead on a GitHub-hosted runner, unaffected by that policy: push to
+`main` (or trigger it manually from the repo's **Actions** tab), then download the signed
+`ScaleBridge-apk` artifact from the finished run. See the repo's Actions tab for build status.
 
-1. .NET SDK 9 (or the matching SDK for whatever `TargetFramework` ends up in
+Note: that workflow currently signs every build with a **fresh throwaway keystore generated on
+each run**, purely so it works out of the box. That means every new build must be installed over
+an uninstalled previous copy (Android refuses to install an update signed by a different key).
+Switch to one persisted keystore stored as a repo secret before relying on this for real,
+in-place updates.
+
+## Prerequisites (if building locally instead)
+
+1. .NET SDK 10 (or the matching SDK for whatever `TargetFramework` ends up in
    `src/ScaleBridge/ScaleBridge.csproj`).
 2. The Android workload: `dotnet workload install android`. This provisions the Android SDK/NDK
    and OpenJDK for you - you do not need Android Studio, though it's a fine way to get the same
@@ -47,13 +58,13 @@ build without surprises.
 ## Installing on the phone
 
 ```
-dotnet build -t:Run -f net9.0-android    # deploys + launches on a connected/emulated device
+dotnet build -t:Run -f net10.0-android    # deploys + launches on a connected/emulated device
 ```
 
 or, for a real sideloaded release build:
 
 ```
-dotnet publish -f net9.0-android -c Release -p:AndroidKeyStore=true \
+dotnet publish -f net10.0-android -c Release -p:AndroidKeyStore=true \
   -p:AndroidSigningKeyStore=<path-to-your.keystore> \
   -p:AndroidSigningKeyAlias=<alias> \
   -p:AndroidSigningKeyPass=<key password> \
@@ -69,7 +80,7 @@ keytool -genkeypair -v -keystore scalebridge.keystore -alias scalebridge -keyalg
 ```
 
 `dotnet publish` produces a signed, ready-to-install `.apk` under
-`bin/Release/net9.0-android/publish/`. Transfer it to the phone (USB, cloud storage link, email to
+`bin/Release/net10.0-android/publish/`. Transfer it to the phone (USB, cloud storage link, email to
 yourself - whatever's convenient) and open it from Files/Downloads to install. The phone will ask
 to allow "install unknown apps" for whichever app you used to open the file (Files, Chrome,
 Gmail, etc.) the first time - allow it just for that one app if prompted.

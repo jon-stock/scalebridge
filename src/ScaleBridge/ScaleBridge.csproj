@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <!-- Android-only, plain .NET for Android (no MAUI) - single-purpose background sync utility. -->
-    <TargetFramework>net9.0-android</TargetFramework>
+    <TargetFramework>net10.0-android</TargetFramework>
     <OutputType>Exe</OutputType>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -12,9 +12,13 @@
     <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
 
     <!-- Health Connect is built-in on Android 14 (API 34) and available as a separate app back to
-         Android 9 (API 28). We target API 26+ at runtime but Health Connect itself needs 28+. -->
+         Android 9 (API 28). We target API 26+ at runtime but Health Connect itself needs 28+.
+         TargetPlatformVersion is the *compile-time* API level and must match a platform pack the
+         restored Android workload actually ships (net10.0-android's workload only ships 35.0/36.0
+         - API 34 was dropped) - it does not lower the app's actual minimum supported OS version,
+         which is controlled by SupportedOSPlatformVersion below. -->
     <SupportedOSPlatformVersion>26</SupportedOSPlatformVersion>
-    <TargetPlatformVersion>34</TargetPlatformVersion>
+    <TargetPlatformVersion>35.0</TargetPlatformVersion>
 
     <AndroidLinkMode>SdkOnly</AndroidLinkMode>
     <AndroidUseAapt2>true</AndroidUseAapt2>
