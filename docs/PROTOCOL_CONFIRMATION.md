@@ -327,3 +327,23 @@ clipped by circular/squircle/rounded-square launcher masks. Added a separate, si
 notification icon (`drawable/ic_notification.xml`): status bar icons render only their alpha
 channel (tinted by the system), so reusing the full-colour launcher icon there would have looked
 like a solid blob rather than a recognisable shape.
+
+## Post-second-install usability feedback
+
+Three plain UI bugs, all standard Android issues unrelated to Health Connect/Kotlin binding
+risk:
+
+- The "not granted" Health Connect permission message was shown as a Toast, which disappears
+  on its own after a few seconds and was too long to reliably read in time. Replaced with an
+  AlertDialog (stays up until dismissed) in MainActivity.OnHealthConnectPermissionResult.
+- The debug-scan device ListView couldn't be scrolled once more devices were found than fit in
+  its fixed-height container. Root cause: it's nested inside the screen's outer ScrollView,
+  which is a well-known Android trap - the outer ScrollView intercepts the drag gesture before
+  the list itself ever sees it. Fixed with the standard workaround: a Touch handler on the list
+  that tells its parent not to intercept touches starting on the list, while still letting the
+  list process them normally.
+- Tapping a device appeared to do nothing to the MAC address field, even though the code was
+  filling it in correctly - the field lives in a card further down the screen, below the device
+  list, so nothing drew the user's attention to scroll down and see it. Fixed by calling
+  RequestFocus() on the field after populating it: a descendant of a ScrollView requesting
+  focus makes the ScrollView automatically scroll to bring it into view.

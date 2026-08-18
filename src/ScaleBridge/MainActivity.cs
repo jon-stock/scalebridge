@@ -93,6 +93,17 @@ public class MainActivity : ComponentActivity
         _lvDevices.Adapter = _deviceListAdapter;
         _lvDevices.ItemClick += OnDeviceRowClicked;
 
+        // A plain ListView nested inside an outer ScrollView is a well-known Android trap: the
+        // ScrollView intercepts touch/drag gestures before the list ever sees them, so the list
+        // itself can't be scrolled once it has more items than fit in its fixed height. Telling
+        // the parent not to intercept touches that start on the list (while still letting the
+        // list handle them normally - e.Handled is left false) is the standard fix.
+        _lvDevices.Touch += (_, e) =>
+        {
+            _lvDevices.Parent?.RequestDisallowInterceptTouchEvent(true);
+            e.Handled = false;
+        };
+
         FindViewById<Button>(Resource.Id.btnPermissions)!.Click += (_, _) => RequestAndroidPermissions();
         FindViewById<Button>(Resource.Id.btnHealthConnect)!.Click += (_, _) => RequestHealthConnectPermission();
         FindViewById<Button>(Resource.Id.btnScanDebug)!.Click += (_, _) => RunDebugScan();
@@ -201,11 +212,18 @@ public class MainActivity : ComponentActivity
         bool granted = HealthConnectWriter.GrantedSetIncludesWritePermission(result);
         _lastHealthConnectPermissionResult = granted
             ? "Granted - Health Connect writes are allowed."
-            : "Not granted - open the button again, or grant it from Health Connect's own app settings.";
+            : "Not granted. Open the button again, or grant it from Health Connect's own app settings.";
 
         RunOnUiThread(() =>
         {
-            Toast.MakeText(this, _lastHealthConnectPermissionResult, ToastLength.Long)!.Show();
+            // A Toast is the wrong tool here: it disappears on its own after a few seconds and
+            // this message is too long to reliably read (or even see in full) in that time. A
+            // dialog stays up until dismissed, so the full text is always readable.
+            new AlertDialog.Builder(this)!
+                .SetTitle("Health Connect permission")!
+                .SetMessage(_lastHealthConnectPermissionResult)!
+                .SetPositiveButton("OK", (EventHandler<DialogClickEventArgs>?)null)!
+                .Show();
             RefreshStatus();
         });
     }
@@ -284,7 +302,13 @@ public class MainActivity : ComponentActivity
 
         string address = _deviceAddressesInOrder[e.Position];
         _etMac.Text = address;
-        Toast.MakeText(this, $"Filled in {address}", ToastLength.Short)!.Show();
+        _etMac.SetSelection(address.Length);
+        // The MAC field is in a card further down the screen, below the device list - without
+        // this, the field does get updated but the user has no reason to scroll down and see
+        // that it worked. RequestFocus on a descendant of a ScrollView makes it auto-scroll to
+        // bring that view into view.
+        _etMac.RequestFocus();
+        Toast.MakeText(this, $"Filled in {address} - see the MAC address field below.", ToastLength.Short)!.Show();
     }
 
     private sealed class DebugScanCallback : ScanCallback
