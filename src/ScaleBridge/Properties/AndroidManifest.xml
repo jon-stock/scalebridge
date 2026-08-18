@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" android:versionCode="1" android:versionName="1.0">
+  <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />
+
+  <!-- Bluetooth: Android 12+ (API 31+) runtime-requested scan/connect permissions.
+       neverForLocation on BLUETOOTH_SCAN avoids also needing ACCESS_FINE_LOCATION,
+       since we only ever scan for one known device by name/MAC, not for location use. -->
+  <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+  <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+  <!-- Pre-Android-12 devices use the legacy permissions instead. -->
+  <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+  <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+  <!-- Health Connect write permission for body weight. -->
+  <uses-permission android:name="android.permission.health.WRITE_WEIGHT" />
+
+  <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+
+  <application android:label="ScaleBridge" android:allowBackup="true" android:icon="@drawable/appicon">
+
+    <!-- MainActivity itself is declared via the [Activity(MainLauncher = true, ...)] attribute
+         in MainActivity.cs, which the build merges in here automatically. Every other component
+         below is declared here explicitly instead of via attributes, so the exported/intent-filter
+         wiring for the always-on receivers and the service is easy to audit in one place. -->
+
+    <!-- Receives the system-delivered PendingIntent when the scale's advertisement matches our
+         scan filter, even if the app process is not currently running (Section 4, requirement 1). -->
+    <receiver android:name=".Ble.ScaleScanReceiver" android:exported="true" />
+
+    <!-- Re-arms the scan filter after a reboot, since BLE scan filters registered with a
+         PendingIntent do not automatically survive a full device restart (Section 5, reliability). -->
+    <receiver android:name=".Boot.BootCompletedReceiver" android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+      </intent-filter>
+    </receiver>
+
+    <!-- Foreground service that owns the GATT connection for the short-lived
+         connect -> handshake -> capture -> write -> disconnect sequence. -->
+    <service android:name=".Ble.ScaleConnectionService"
+             android:exported="false"
+             android:foregroundServiceType="connectedDevice" />
+
+  </application>
+</manifest>

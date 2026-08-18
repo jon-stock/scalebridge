@@ -1,0 +1,15 @@
+# Build outputs
+**/bin/
+**/obj/
+
+# Signing material - never commit a real keystore or its passwords
+*.keystore
+*.jks
+*.pfx
+keystore.properties
+
+# Editor/OS noise
+.vs/
+.vscode/
+*.user
+.DS_Store

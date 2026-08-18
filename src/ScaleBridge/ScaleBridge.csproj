@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Android-only, plain .NET for Android (no MAUI) - single-purpose background sync utility. -->
+    <TargetFramework>net9.0-android</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationId>uk.co.accessuk.scalebridge</ApplicationId>
+    <ApplicationTitle>ScaleBridge</ApplicationTitle>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+
+    <!-- Health Connect is built-in on Android 14 (API 34) and available as a separate app back to
+         Android 9 (API 28). We target API 26+ at runtime but Health Connect itself needs 28+. -->
+    <SupportedOSPlatformVersion>26</SupportedOSPlatformVersion>
+    <TargetPlatformVersion>34</TargetPlatformVersion>
+
+    <AndroidLinkMode>SdkOnly</AndroidLinkMode>
+    <AndroidUseAapt2>true</AndroidUseAapt2>
+    <RootNamespace>ScaleBridge</RootNamespace>
+    <AssemblyName>ScaleBridge</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Standard, well-established C# bindings (NotificationCompat, etc.) used for the minimal
+         status notification (Prompt.md Section 4, requirement 7). -->
+    <PackageReference Include="Xamarin.AndroidX.Core" Version="1.13.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Pulls androidx.health.connect + its transitive Kotlin/coroutines dependencies and generates
+         C# bindings automatically. This is the one part of the project most likely to need a small
+         adjustment after the first real build - see docs/PROTOCOL_CONFIRMATION.md and
+         docs/SETUP.md for details on why, and how to fix binding-name drift if `dotnet build`
+         reports missing members here. -->
+    <AndroidMavenLibrary Include="androidx.health.connect:connect-client" Version="1.1.0-alpha07" />
+  </ItemGroup>
+
+</Project>

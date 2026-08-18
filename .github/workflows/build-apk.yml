@@ -1,0 +1,55 @@
+name: Build ScaleBridge APK
+
+# Runs on GitHub's hosted runner instead of a local machine, since local Group Policy blocks the
+# Android workload installer's dotnet.exe subprocess (see docs/PROTOCOL_CONFIRMATION.md).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Restore Android workload
+        run: dotnet workload restore src/ScaleBridge/ScaleBridge.csproj
+
+      - name: Generate a throwaway signing keystore
+        # For real, repeated installs on the same phone you must reuse one keystore (Android
+        # refuses to install an update signed by a different key over an existing app) - see
+        # docs/SETUP.md. This step generates a fresh one every run, which is fine while you're
+        # still iterating and reinstalling from scratch, but swap in a persisted keystore
+        # (stored as a repo secret) before relying on this for real updates.
+        shell: pwsh
+        run: |
+          $jdk = & dotnet --list-sdks | Out-Null
+          keytool -genkeypair -v `
+            -keystore scalebridge.keystore `
+            -alias scalebridge `
+            -keyalg RSA -keysize 2048 -validity 10000 `
+            -storepass "scalebridge-test" -keypass "scalebridge-test" `
+            -dname "CN=ScaleBridge Test, OU=Test, O=Test, L=Test, S=Test, C=GB"
+
+      - name: Publish signed Release APK
+        run: >
+          dotnet publish src/ScaleBridge/ScaleBridge.csproj
+          -f net9.0-android -c Release
+          -p:AndroidKeyStore=true
+          -p:AndroidSigningKeyStore=${{ github.workspace }}\scalebridge.keystore
+          -p:AndroidSigningKeyAlias=scalebridge
+          -p:AndroidSigningKeyPass=scalebridge-test
+          -p:AndroidSigningStorePass=scalebridge-test
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScaleBridge-apk
+          path: src/ScaleBridge/bin/Release/**/*-Signed.apk
+          if-no-files-found: error
