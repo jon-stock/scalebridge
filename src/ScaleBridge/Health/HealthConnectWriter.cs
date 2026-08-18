@@ -1,12 +1,11 @@
 using System.Collections.Generic;
-using AndroidX.Health.Connect.Client;
-// Java packages (for cross-checking against the generated binding if these don't resolve):
-//   androidx.health.connect.client.records.WeightRecord / Record   -> AndroidX.Health.Connect.Client.Records
-//   androidx.health.connect.client.units.Mass                      -> AndroidX.Health.Connect.Client.Units
-//   androidx.health.connect.client.response.InsertRecordsResponse  -> AndroidX.Health.Connect.Client.Response
-using AndroidX.Health.Connect.Client.Records;
-using AndroidX.Health.Connect.Client.Response;
-using AndroidX.Health.Connect.Client.Units;
+// Confirmed against a real build: the binding generator produces "Androidx" (lowercase "ndroidx"),
+// not "AndroidX", for this Maven-resolved library - unlike the NuGet-distributed AndroidX
+// bindings (e.g. AndroidX.Core.App used in Status/SyncNotifier.cs), which do use "AndroidX".
+using Androidx.Health.Connect.Client;
+using Androidx.Health.Connect.Client.Records;
+using Androidx.Health.Connect.Client.Response;
+using Androidx.Health.Connect.Client.Units;
 using Android.Content;
 
 namespace ScaleBridge.Health;

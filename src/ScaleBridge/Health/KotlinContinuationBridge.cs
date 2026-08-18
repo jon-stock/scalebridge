@@ -29,7 +29,9 @@ internal sealed class KotlinContinuationBridge<TResult> : Java.Lang.Object, ICon
 {
     private readonly TaskCompletionSource<TResult?> _tcs = new();
 
-    public ICoroutineContext GetContext() => EmptyCoroutineContext.Instance!;
+    // Confirmed against a real build: the generated interface member is the property `Context`
+    // (matching Kotlin's `val context: CoroutineContext`), not a `GetContext()` method.
+    public ICoroutineContext Context => EmptyCoroutineContext.Instance!;
 
     public void ResumeWith(Java.Lang.Object? result)
     {

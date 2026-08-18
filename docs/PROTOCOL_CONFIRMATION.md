@@ -123,6 +123,24 @@ with the protocol logic:
   `connect-client` `AndroidMavenLibrary` item, after fixing the other seven dependencies for
   real - see the comment above that item in `ScaleBridge.csproj`.
 
+With the dependency graph settled, the next CI run reached real C# compile errors - genuinely
+useful ones, unlike the environment/versioning noise above:
+
+- The binding generator produces the namespace `Androidx.Health.Connect.Client...` (lowercase
+  `ndroidx`) for this Maven-resolved library, not `AndroidX.Health.Connect.Client...` as
+  originally guessed. Fixed in `HealthConnectWriter.cs`. (Note this is unrelated to, and cased
+  differently from, the NuGet-distributed AndroidX bindings such as `AndroidX.Core.App` used in
+  `Status/SyncNotifier.cs`, which do use `AndroidX`.)
+- `kotlin.coroutines.Continuation`'s generated C# interface member is a `Context` **property**,
+  not a `GetContext()` method as originally guessed. Fixed in `KotlinContinuationBridge.cs`.
+- A handful of classes in `connect-client` that this app never uses - exercise-route, error, and
+  changes-event plumbing - fail to bind cleanly: they don't implement an inherited abstract
+  member, a known class-parse limitation with certain Kotlin protobuf-backed classes and
+  nullable-generic `ActivityResultContract` overrides, not something fixable from this project's
+  own C# code. Fixed by excluding those specific classes via `Transforms/Metadata.xml`
+  (auto-applied by the build), since ScaleBridge only ever touches
+  `WeightRecord`/`Mass`/`HealthConnectClient`.
+
 Practically, confidence levels are now:
 
 - **High confidence, and now compiling in CI:** `QnFrameParser` (pure C#, no Android types,

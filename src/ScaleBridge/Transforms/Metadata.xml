@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<metadata>
+  <!-- androidx.health.connect:connect-client binds a handful of exercise-route/error/changes
+       classes that this weight-only app never uses, and that class-parse cannot bind cleanly:
+       they fail to implement an inherited abstract member (a known class-parse limitation with
+       certain Kotlin protobuf-backed classes and nullable-generic ActivityResultContract
+       overrides - not something this project's own code can fix). Removing them here is safe
+       for our purposes since ScaleBridge only ever touches WeightRecord/Mass/HealthConnectClient.
+       See docs/PROTOCOL_CONFIRMATION.md for the full explanation and what to check if a future
+       connect-client version needs different classes removed here. -->
+  <remove-node path="/api/package[@name='androidx.health.platform.client.exerciseroute']/class[@name='ExerciseRoute']" />
+  <remove-node path="/api/package[@name='androidx.health.platform.client.error']/class[@name='ErrorStatus']" />
+  <remove-node path="/api/package[@name='androidx.health.platform.client.changes']/class[@name='ChangesEvent']" />
+  <remove-node path="/api/package[@name='androidx.health.connect.client.contracts']/class[@name='ExerciseRouteRequestContract']" />
+</metadata>
