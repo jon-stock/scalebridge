@@ -37,8 +37,12 @@
          C# bindings automatically. This is the one part of the project most likely to need a small
          adjustment after the first real build - see docs/PROTOCOL_CONFIRMATION.md and
          docs/SETUP.md for details on why, and how to fix binding-name drift if `dotnet build`
-         reports missing members here. -->
-    <AndroidMavenLibrary Include="androidx.health.connect:connect-client" Version="1.1.0-alpha07" />
+         reports missing members here.
+
+         Repository="Google" is required: AndroidMavenLibrary defaults to Maven Central, but
+         AndroidX artifacts (including this one) are published to Google's Maven repository
+         instead, not mirrored to Central - omitting this caused a 404 on the first CI build. -->
+    <AndroidMavenLibrary Include="androidx.health.connect:connect-client" Version="1.1.0-alpha07" Repository="Google" />
   </ItemGroup>
 
 </Project>

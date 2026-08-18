@@ -73,7 +73,7 @@ group policy"), so `dotnet build`/`dotnet publish` could never be run there dire
 no physical Android phone or Archonfit scale attached.
 
 The build instead runs on a GitHub Actions hosted runner (`.github/workflows/build-apk.yml`),
-which isn't subject to that policy - see `docs/SETUP.md`. Its first two real build attempts
+which isn't subject to that policy - see `docs/SETUP.md`. Its first few real build attempts
 caught (and this project has since fixed) environment/versioning issues that had nothing to do
 with the protocol logic:
 
@@ -85,6 +85,10 @@ with the protocol logic:
   property is now omitted entirely so the SDK picks whichever platform pack is actually
   installed. This only affects the compile-time API surface, not the app's real minimum
   supported OS version (`SupportedOSPlatformVersion`, still `26`).
+- The `AndroidMavenLibrary` reference for `androidx.health.connect:connect-client` 404'd:
+  `AndroidMavenLibrary` defaults to resolving from Maven Central, but AndroidX artifacts
+  (including this one) are published to Google's Maven repository and are not mirrored to
+  Central. Fixed by adding `Repository="Google"` to that item in `ScaleBridge.csproj`.
 
 Practically, confidence levels are now:
 
