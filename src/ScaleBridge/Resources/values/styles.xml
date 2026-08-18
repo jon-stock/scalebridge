@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="AppTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <!-- Explicitly Light, not the DayNight variant: DayNight auto-switches to dark-mode
+         defaults (light text/foreground colours, meant for a dark background) whenever the
+         phone's system dark mode is on, but every background colour in this app (colors.xml) is
+         a single hardcoded light value with no night-mode variants - the mismatch produced
+         invisible white-on-white text in input fields on a phone with dark mode enabled. Forcing
+         Light avoids the whole light/dark mismatch class of bugs for this small, single-purpose
+         screen rather than trying to properly support both. -->
+    <style name="AppTheme" parent="Theme.MaterialComponents.Light.NoActionBar">
         <item name="colorPrimary">@color/brand_primary</item>
         <item name="colorPrimaryDark">@color/brand_primary_dark</item>
         <item name="colorAccent">@color/brand_accent</item>

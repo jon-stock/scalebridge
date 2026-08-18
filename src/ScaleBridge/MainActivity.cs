@@ -157,7 +157,8 @@ public class MainActivity : ComponentActivity
         }
         else if (lastSync is not null && lastWeight is not null)
         {
-            _tvLastSync.Text = $"{lastWeight:0.0} kg at {lastSync.Value.ToLocalTime():g}";
+            var local = lastSync.Value.ToLocalTime();
+            _tvLastSync.Text = $"{lastWeight:0.0} kg\n{local:dd MMM yyyy} at {local:HH:mm}";
         }
         else
         {

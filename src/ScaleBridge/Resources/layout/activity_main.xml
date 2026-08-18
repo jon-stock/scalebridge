@@ -180,6 +180,8 @@
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/etMac"
                         android:hint="MAC address (preferred), e.g. AA:BB:CC:DD:EE:FF"
+                        android:textColor="@color/brand_text_primary"
+                        android:textColorHint="@color/brand_text_secondary"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content" />
                 </com.google.android.material.textfield.TextInputLayout>
@@ -197,6 +199,8 @@
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/etName"
                         android:hint="Advertised name (only used if MAC is blank)"
+                        android:textColor="@color/brand_text_primary"
+                        android:textColorHint="@color/brand_text_secondary"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content" />
                 </com.google.android.material.textfield.TextInputLayout>

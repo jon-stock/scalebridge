@@ -347,3 +347,36 @@ risk:
   list, so nothing drew the user's attention to scroll down and see it. Fixed by calling
   RequestFocus() on the field after populating it: a descendant of a ScrollView requesting
   focus makes the ScrollView automatically scroll to bring it into view.
+
+## First real scale test: connection never happened at all
+
+The scale's own Bluetooth indicator never lit up when testing against the real device - a
+previously-working app (used for comparison) does light it up, meaning the scale itself is fine
+and the fault is in this app's connection-triggering path, not the GATT/protocol layer.
+
+Root cause, found by inspecting the manifest rather than guessing: `Ble/ScaleScanReceiver` was
+declared with `android:exported="true"` but **no `<intent-filter>`** for the action it's meant to
+receive (`uk.co.accessuk.scalebridge.ACTION_SCALE_FOUND`). The BLE scan-result `PendingIntent` is
+delivered as an implicit broadcast (action + package, no explicit component); without a matching
+`<intent-filter>`, Android's broadcast resolution has no way to match it to this receiver at all,
+so it's silently dropped before the receiver's `OnReceive` ever runs - the entire wake-on-scan
+mechanism was non-functional. This has been present since the very first version of the manifest;
+this was simply the first time the real end-to-end BLE flow was ever exercised. Fixed by adding
+the missing `<intent-filter>`.
+
+This does not yet confirm the GATT/protocol layer itself works correctly against the real
+Archonfit unit - only that a connection attempt should now actually be triggered. The logcat
+verification step in this document's "What still needs confirming on the real device" section
+is still the next thing to do.
+
+## White-on-white input text
+
+Reported after the second real install: text typed/filled into the MAC/name fields was invisible
+(white text on a white field). Root cause: `AppTheme` used
+`Theme.MaterialComponents.DayNight.NoActionBar`, which automatically switches to dark-mode
+default colours (light text, meant for a dark background) when the phone's system dark mode is
+on - but every background colour in this app (`colors.xml`) is a single hardcoded light value
+with no night-mode variant, so on a phone in dark mode the text defaulted to light-on-light.
+Fixed by using the explicitly-Light theme variant instead of DayNight (this is a small,
+single-purpose utility screen - not worth properly supporting both light and dark mode for), plus
+explicit `android:textColor`/`textColorHint` directly on the input fields as a second safeguard.
