@@ -150,6 +150,15 @@ useful ones, unlike the environment/versioning noise above:
   `androidx.health.connect.client.contracts` package, rather than continuing to chase individual
   classes - both are internal/unused as far as ScaleBridge is concerned, which only ever calls the
   public `HealthConnectClient`/`WeightRecord`/`Mass`/`InsertRecordsResponse` API surface.
+- With those internal packages excluded, the next failures were all ten classes in
+  `androidx.health.connect.client.units` (`Mass`, `Length`, `Energy`, `Power`, `Pressure`,
+  `Percentage`, `Temperature`, `Velocity`, `Volume`, `BloodGlucose`) - each fails to implement
+  `IComparable.CompareTo(Object)`. Unlike the previous failures, `Mass` in particular is a class
+  this app actually needs (`Mass.Kilograms(...)` in `HealthConnectWriter.cs`), so it can't simply
+  be excluded. Since every one of these generated binding classes is `partial`, fixed by
+  completing the missing interface member in ordinary C# (`Health/UnitsComparableFixups.cs`)
+  rather than via a metadata transform - ScaleBridge never actually calls `CompareTo` on any of
+  them, so each stub only needs to satisfy the compiler.
 
 Practically, confidence levels are now:
 
