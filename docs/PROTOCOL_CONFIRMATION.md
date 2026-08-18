@@ -134,12 +134,22 @@ useful ones, unlike the environment/versioning noise above:
 - `kotlin.coroutines.Continuation`'s generated C# interface member is a `Context` **property**,
   not a `GetContext()` method as originally guessed. Fixed in `KotlinContinuationBridge.cs`.
 - A handful of classes in `connect-client` that this app never uses - exercise-route, error, and
-  changes-event plumbing - fail to bind cleanly: they don't implement an inherited abstract
+  changes-event plumbing - failed to bind cleanly: they don't implement an inherited abstract
   member, a known class-parse limitation with certain Kotlin protobuf-backed classes and
   nullable-generic `ActivityResultContract` overrides, not something fixable from this project's
-  own C# code. Fixed by excluding those specific classes via `Transforms/Metadata.xml`
-  (auto-applied by the build), since ScaleBridge only ever touches
-  `WeightRecord`/`Mass`/`HealthConnectClient`.
+  own C# code. First fix attempt excluded those four specific classes via
+  `Transforms/Metadata.xml`.
+- That per-class exclusion turned out to be the wrong granularity: the next build uncovered many
+  more failures in the same family, spanning the *entire* internal
+  `androidx.health.platform.client` package (connect-client's IPC/protobuf transport layer used to
+  talk to the Health Platform service - protobuf-lite's abstract generic `Builder` pattern and an
+  AIDL-generated service-stub pattern both failed to bind), plus a second broken
+  `ActivityResultContract` class (`HealthPermissionsRequestContract`) alongside the first
+  (`ExerciseRouteRequestContract`). Fixed by excluding the whole `androidx.health.platform.client`
+  package tree (via `starts-with()` on the package name) and the whole
+  `androidx.health.connect.client.contracts` package, rather than continuing to chase individual
+  classes - both are internal/unused as far as ScaleBridge is concerned, which only ever calls the
+  public `HealthConnectClient`/`WeightRecord`/`Mass`/`InsertRecordsResponse` API surface.
 
 Practically, confidence levels are now:
 

@@ -1,15 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <metadata>
-  <!-- androidx.health.connect:connect-client binds a handful of exercise-route/error/changes
-       classes that this weight-only app never uses, and that class-parse cannot bind cleanly:
-       they fail to implement an inherited abstract member (a known class-parse limitation with
-       certain Kotlin protobuf-backed classes and nullable-generic ActivityResultContract
-       overrides - not something this project's own code can fix). Removing them here is safe
-       for our purposes since ScaleBridge only ever touches WeightRecord/Mass/HealthConnectClient.
-       See docs/PROTOCOL_CONFIRMATION.md for the full explanation and what to check if a future
-       connect-client version needs different classes removed here. -->
-  <remove-node path="/api/package[@name='androidx.health.platform.client.exerciseroute']/class[@name='ExerciseRoute']" />
-  <remove-node path="/api/package[@name='androidx.health.platform.client.error']/class[@name='ErrorStatus']" />
-  <remove-node path="/api/package[@name='androidx.health.platform.client.changes']/class[@name='ChangesEvent']" />
-  <remove-node path="/api/package[@name='androidx.health.connect.client.contracts']/class[@name='ExerciseRouteRequestContract']" />
+  <!-- androidx.health.platform.client is connect-client's *internal* IPC/protobuf transport
+       layer (Binder service stubs + a bundled protobuf-lite runtime) used to talk to the Health
+       Platform service - not part of the public API surface this app calls. Whole categories of
+       it fail to bind cleanly with class-parse: protobuf-lite's abstract generic Builder pattern
+       (AbstractMessageLite.Builder.MergeFrom/Clone), and an AIDL-generated service-stub pattern
+       (IHealthDataSdkService/HealthDataSdkService duplicate members/partial-class conflicts) -
+       both well-known hard cases for Java/Kotlin binding tools generally, not something fixable
+       from this project's own C# code. Excluding this whole internal package tree (rather than
+       chasing individual classes within it one at a time, which was tried first and simply
+       uncovered more of the same underlying problem) is safe: ScaleBridge only ever calls the
+       public HealthConnectClient/WeightRecord/Mass/InsertRecordsResponse API surface, never
+       anything under androidx.health.platform.client directly.
+
+       androidx.health.connect.client.contracts holds ActivityResultContract-based classes for
+       requesting exercise-route/health-permissions via Android's Activity Result APIs. This app
+       requests permissions via plain runtime RequestPermissions (see MainActivity.cs) instead, so
+       none of it is needed - and (like the internal package above) it has the same
+       nullable-generic ActivityResultContract binding problem in more than one class here
+       (ExerciseRouteRequestContract, HealthPermissionsRequestContract), so the whole package is
+       excluded rather than each broken class individually.
+
+       See docs/PROTOCOL_CONFIRMATION.md for the fuller explanation and iteration history, and
+       what to check if a future connect-client version restructures these packages. -->
+  <remove-node path="/api/package[starts-with(@name, 'androidx.health.platform.client')]" />
+  <remove-node path="/api/package[@name='androidx.health.connect.client.contracts']" />
 </metadata>
