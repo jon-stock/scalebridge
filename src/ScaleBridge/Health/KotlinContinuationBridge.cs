@@ -59,10 +59,14 @@ internal sealed class KotlinContinuationBridge<TResult> : Java.Lang.Object, ICon
         {
             // kotlin.Result.exceptionOrNull() is a static-ish extension on the boxed value in
             // Kotlin, but from Java it is called as an instance method on the boxed Result.
+            // Deliberately avoided casting the result to Java.Lang.Throwable here (an `as`
+            // conversion the compiler rejected as unrepresentable in this context) - ToString()
+            // on the raw Java.Lang.Object is enough for a diagnostic message, and this failure
+            // path is not used for any control-flow decision.
             using var method = boxedKotlinResult.Class.GetMethod("exceptionOrNull");
-            var thrown = method.Invoke(boxedKotlinResult) as Java.Lang.Throwable;
+            var thrown = method.Invoke(boxedKotlinResult);
             return thrown is not null
-                ? new InvalidOperationException($"Health Connect call failed: {thrown.Message}", thrown)
+                ? new InvalidOperationException($"Health Connect call failed: {thrown}")
                 : new InvalidOperationException("Health Connect call failed with an unrecognised kotlin.Result failure.");
         }
         catch (Exception reflectionEx)

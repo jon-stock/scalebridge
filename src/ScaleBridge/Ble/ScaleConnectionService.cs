@@ -48,7 +48,7 @@ public class ScaleConnectionService : Service
         var device = adapter?.GetRemoteDevice(address);
         if (adapter is null || device is null)
         {
-            FailAndStop("Bluetooth adapter unavailable.");
+            FailAndStop("Bluetooth adapter unavailable.", isError: true);
             return StartCommandResult.NotSticky;
         }
 

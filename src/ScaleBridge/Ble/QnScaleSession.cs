@@ -170,9 +170,11 @@ public sealed class QnScaleSession : BluetoothGattCallback
                 return;
             }
 
-            descriptor.SetValue(indicate
+            // Bound as IList<byte> rather than byte[]; SetValue needs the array form.
+            var enableValue = indicate
                 ? BluetoothGattDescriptor.EnableIndicationValue
-                : BluetoothGattDescriptor.EnableNotificationValue);
+                : BluetoothGattDescriptor.EnableNotificationValue;
+            descriptor.SetValue(enableValue?.ToArray());
             gatt.WriteDescriptor(descriptor);
         });
     }

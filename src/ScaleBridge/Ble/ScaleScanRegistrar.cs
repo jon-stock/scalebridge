@@ -46,8 +46,11 @@ public static class ScaleScanRegistrar
         if (filters.Count == 0)
             return RegisterResult.NotConfigured;
 
+        // Android.Bluetooth.ScanMode (classic Bluetooth discoverability) and
+        // Android.Bluetooth.LE.ScanMode (BLE scan power/latency tradeoff) share a short name;
+        // ScanSettings.Builder.SetScanMode needs the LE one, qualified to avoid ambiguity.
         var settings = new ScanSettings.Builder()
-            .SetScanMode(ScanMode.LowPower)
+            .SetScanMode(Android.Bluetooth.LE.ScanMode.LowPower)
             .Build();
 
         var pendingIntent = BuildPendingIntent(context);

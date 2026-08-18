@@ -168,6 +168,34 @@ useful ones, unlike the environment/versioning noise above:
   happen to share a short name. Fixed by reimplementing each stub in
   `Health/UnitsComparableFixups.cs` against `Java.Lang.IComparable` instead.
 
+With the Health Connect binding fully resolved, the next build reached the last category of
+errors: genuine mistakes in ScaleBridge's own application code (not binding-generator issues),
+all straightforward once seen:
+
+- `Record` (the sealed Kotlin interface every Health Connect record type implements) is bound as
+  `IRecord`, not a `Record` class - fixed the `List<...>` in `HealthConnectWriter.cs` accordingly.
+- `Mass.Kilograms(weightKg)` doesn't compile: it resolves to the *instance* property from
+  Kotlin's `getKilograms()` getter (for reading an existing `Mass` back out in kilograms), not
+  the static `kilograms(double)` factory - the real AndroidX Kotlin source (`Mass.kt`) confirms
+  the factory genuinely exists as a `@JvmStatic` companion method, but it collided by name with
+  that getter and the binding generator resolved the collision in the property's favour, leaving
+  the factory bound under some other, unconfirmed name. Fixed by invoking the real JVM method
+  directly via Java reflection (`CreateMassInKilograms` in `HealthConnectWriter.cs`), which
+  sidesteps the naming ambiguity entirely rather than guessing what the factory ended up being
+  called.
+- `BluetoothGattDescriptor.EnableIndicationValue`/`EnableNotificationValue` are bound as
+  `IList<byte>`, not `byte[]` - fixed with `.ToArray()` in `QnScaleSession.cs`.
+- A `FailAndStop(...)` call in `ScaleConnectionService.cs` was missing its required `isError`
+  argument.
+- `Intent.GetParcelableArrayListExtra(...)` returns a raw, untyped `IList`, not
+  `IList<IParcelable>` - fixed the null-coalescing/iteration in `ScaleScanReceiver.cs`.
+- `ScanMode` was ambiguous between `Android.Bluetooth.ScanMode` (classic Bluetooth
+  discoverability) and `Android.Bluetooth.LE.ScanMode` (BLE scan power/latency) - fully qualified
+  in `ScaleScanRegistrar.cs`.
+- An `as Java.Lang.Throwable` cast in `KotlinContinuationBridge.cs`'s failure-extraction path
+  didn't compile; replaced with a plain `ToString()` on the raw `Java.Lang.Object`, since that
+  path only needs a diagnostic string, not the real exception type.
+
 Practically, confidence levels are now:
 
 - **High confidence, and now compiling in CI:** `QnFrameParser` (pure C#, no Android types,

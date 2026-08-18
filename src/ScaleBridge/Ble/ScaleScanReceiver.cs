@@ -3,7 +3,6 @@ using Android.Bluetooth;
 using Android.Bluetooth.LE;
 using Android.Content;
 using Android.Util;
-using System.Linq;
 
 namespace ScaleBridge.Ble;
 
@@ -31,17 +30,20 @@ public class ScaleScanReceiver : BroadcastReceiver
             return;
         }
 
-        // Bound as the non-generic, Parcelable-returning overload; cast each entry back to
-        // ScanResult ourselves rather than relying on a generic/typed overload that may not be
-        // present on every binding version.
+        // Bound as the non-generic, Parcelable-returning overload (returns a raw, untyped
+        // IList); cast each entry back to ScanResult ourselves rather than relying on a
+        // generic/typed overload that may not be present on every binding version.
         var results = intent.GetParcelableArrayListExtra(BluetoothLeScanner.ExtraListScanResult);
         BluetoothDevice? device = null;
-        foreach (var raw in results ?? Enumerable.Empty<Android.OS.IParcelable>())
+        if (results is not null)
         {
-            if (raw is ScanResult { Device: { } scanResultDevice })
+            foreach (var raw in results)
             {
-                device = scanResultDevice;
-                break;
+                if (raw is ScanResult { Device: { } scanResultDevice })
+                {
+                    device = scanResultDevice;
+                    break;
+                }
             }
         }
 

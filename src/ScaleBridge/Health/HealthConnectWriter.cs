@@ -44,10 +44,12 @@ public static class HealthConnectWriter
             var client = HealthConnectClient.GetOrCreate(context);
 
             var instant = Java.Time.Instant.OfEpochMilli(whenUtc.ToUnixTimeMilliseconds());
-            var weight = Mass.Kilograms(weightKg);
+            var weight = CreateMassInKilograms(weightKg);
             var record = new WeightRecord(instant, null, weight, null);
 
-            var records = new List<Record> { record };
+            // Kotlin's `Record` is a sealed interface; the .NET binding exposes it as `IRecord`,
+            // not a `Record` class/type - confirmed against a real build.
+            var records = new List<IRecord> { record };
 
             var bridge = new KotlinContinuationBridge<InsertRecordsResponse>();
             // insertRecords(List<? extends Record>, Continuation<? super InsertRecordsResponse>)
@@ -56,5 +58,27 @@ public static class HealthConnectWriter
             client.InsertRecords(records, bridge);
             bridge.AwaitResult(CallTimeout);
         });
+    }
+
+    /// <summary>
+    /// Constructs a <see cref="Mass"/> via <c>Mass.kilograms(double)</c>, confirmed against the
+    /// real androidx.health.connect.client.units.Mass.kt source to be a genuine
+    /// <c>@JvmStatic</c> factory method on the companion object. It is invoked here via plain
+    /// Java reflection rather than as a direct C# static method call: <c>Mass</c> also has an
+    /// instance property getter <c>getKilograms()</c> (for reading an existing Mass back out in
+    /// kilograms), and the two collided under whatever name the binding generator would
+    /// otherwise have given the static factory - confirmed by `Mass.Kilograms(weightKg)` failing
+    /// to compile with "non-invocable member" (i.e. only the property survived under that name,
+    /// with the factory method bound under some other, unknown name). Reflection sidesteps that
+    /// naming ambiguity entirely by calling the real, stable JVM method directly.
+    /// </summary>
+    private static Mass CreateMassInKilograms(double weightKg)
+    {
+        using var massClass = Java.Lang.Class.FromType(typeof(Mass));
+        using var doubleType = Java.Lang.Double.Type!;
+        using var method = massClass.GetMethod("kilograms", doubleType);
+        using var boxedValue = new Java.Lang.Double(weightKg);
+        var result = method.Invoke(null, boxedValue);
+        return (Mass)result!;
     }
 }
