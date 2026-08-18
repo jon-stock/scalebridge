@@ -21,7 +21,15 @@
          (a convention for organizing unrelated style names alphabetically, not real
          inheritance) - without this, it looked for a non-existent style literally named
          "ScaleBridge" and failed the build ("resource style/ScaleBridge ... not found"). -->
+    <!-- Every one of these two styles' usages in activity_main.xml relies on layout_width/
+         layout_height coming from the style itself (some <TextView style="..."> tags don't
+         specify them directly) - every Android View requires both, from the tag or its style,
+         with no default. Omitting them here caused "Binary XML file ...: You must supply a
+         layout_width attribute" at runtime (a real crash, not a build-time-caught mistake, since
+         AAPT2 doesn't itself flag a style missing these). -->
     <style name="ScaleBridge.SectionTitle" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
         <item name="android:textSize">15sp</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textColor">@color/brand_primary_variant</item>
@@ -30,6 +38,8 @@
     </style>
 
     <style name="ScaleBridge.BodyText" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
         <item name="android:textSize">14sp</item>
         <item name="android:textColor">@color/brand_text_secondary</item>
     </style>

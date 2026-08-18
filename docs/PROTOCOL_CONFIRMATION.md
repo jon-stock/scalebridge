@@ -306,6 +306,18 @@ no file at that path - that would point to something happening at a lower level 
 initialization), which genuinely cannot be diagnosed further without `adb logcat` access to the
 device at the moment of the crash.
 
+That crash screen worked exactly as intended and immediately surfaced the real cause, which
+turned out to be a plain, mundane Android layout mistake with nothing to do with any of the
+Health Connect/Material-theme/reflection theories above:
+`Java.Lang.UnsupportedOperationException: Binary XML file line #1 ...: You must supply a
+layout_width attribute.` Root cause: the `ScaleBridge.SectionTitle` and `ScaleBridge.BodyText`
+styles (used, unstyled with their own explicit `layout_width`/`layout_height`, on most of the
+section-heading `TextView`s in `activity_main.xml`) never defined those two properties. Every
+Android `View` requires both, supplied either directly on the tag or via its style, with no
+default - this isn't caught at build time by AAPT2, only at runtime when the layout is actually
+inflated, which is why it got this far before failing. Fixed by adding
+`android:layout_width`/`android:layout_height` to both styles.
+
 ## Icon and notification icon
 
 Replaced the placeholder flat icon with a proper Android adaptive icon (`mipmap-anydpi-v26/
