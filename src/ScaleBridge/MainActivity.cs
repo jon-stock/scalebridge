@@ -25,8 +25,19 @@ namespace ScaleBridge;
 /// Extends AndroidX's <see cref="ComponentActivity"/> (rather than the plain framework
 /// <c>Activity</c>) specifically to get <c>RegisterForActivityResult</c>, needed for the Health
 /// Connect permission flow below.
+///
+/// The two extra intent-filters below are a documented Health Connect requirement (confirmed
+/// against Google's own Health Connect sample app manifest), not something optional: without an
+/// activity somewhere in the app declaring these, Health Connect refuses to let the app request
+/// permissions directly at all, and instead shows a "manage this from Health Connect's own
+/// settings" redirect message - exactly what was seen before this was added. This activity
+/// doesn't need any special handling code for them: for this small, single-user app, simply
+/// opening the normal main screen (already what happens by default) is a reasonable "rationale"
+/// destination.
 /// </summary>
 [Activity(Label = "ScaleBridge", MainLauncher = true, LaunchMode = Android.Content.PM.LaunchMode.SingleTop)]
+[IntentFilter(new[] { "androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" })]
+[IntentFilter(new[] { "android.intent.action.VIEW_PERMISSION_USAGE" }, Categories = new[] { "android.intent.category.HEALTH_PERMISSIONS" })]
 public class MainActivity : ComponentActivity
 {
     private const int RequestCodeAndroidPermissions = 1001;

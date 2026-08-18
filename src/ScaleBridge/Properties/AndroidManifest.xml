@@ -57,4 +57,13 @@
              android:foregroundServiceType="connectedDevice" />
 
   </application>
+
+  <!-- Required for Health Connect to treat this app as eligible for direct in-app permission
+       requests: without visibility into the Health Connect package (a normal consequence of
+       Android 11+ package-visibility restrictions), Health Connect instead shows a "manage this
+       from Health Connect's own settings" redirect message rather than its normal grant screen -
+       confirmed against Google's own Health Connect sample app manifest. -->
+  <queries>
+    <package android:name="com.google.android.apps.healthdata" />
+  </queries>
 </manifest>

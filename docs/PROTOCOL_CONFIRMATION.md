@@ -380,3 +380,27 @@ with no night-mode variant, so on a phone in dark mode the text defaulted to lig
 Fixed by using the explicitly-Light theme variant instead of DayNight (this is a small,
 single-purpose utility screen - not worth properly supporting both light and dark mode for), plus
 explicit `android:textColor`/`textColorHint` directly on the input fields as a second safeguard.
+
+## Health Connect refusing to grant permission directly ("go via Health Connect")
+
+Tapping "Grant Health Connect write access" opened Health Connect, but instead of the normal
+allow/deny screen it showed a message saying this had to be managed from Health Connect's own
+settings instead. This is documented, expected Health Connect behaviour, not a bug in the
+reflection-based permission code from earlier: Health Connect requires the requesting app to
+declare a "permissions rationale" intent-filter (and be visible to it under Android 11+ package
+visibility rules) before it will let the app request permissions directly - confirmed against
+Google's own Health Connect sample app manifest
+(https://github.com/android/health-samples/blob/main/health-connect/HealthConnectSample/app/src/main/AndroidManifest.xml),
+which was missing both:
+
+- A `<queries><package android:name="com.google.android.apps.healthdata" /></queries>` entry, so
+  this app can even see the Health Connect package.
+- Two intent-filters on `MainActivity` (`androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE`, and
+  `android.intent.action.VIEW_PERMISSION_USAGE` with category
+  `android.intent.category.HEALTH_PERMISSIONS`) that Health Connect uses to link back to the
+  app's own rationale/privacy screen. For this small, single-user personal app, no dedicated
+  rationale screen was built - `MainActivity`'s existing default screen is a reasonable-enough
+  destination for these.
+
+Both are now declared; this should let the normal Health Connect grant screen appear instead of
+the redirect message.
