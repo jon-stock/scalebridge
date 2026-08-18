@@ -104,6 +104,13 @@ with the protocol logic:
   `ScaleBridge.csproj` for the one that looks wrong but isn't
   (`Xamarin.Google.Guava.ListenableFuture` at version `9999.0.0`, a deliberate Guava placeholder
   version).
+- That "latest of each" pass had two more mistakes: `Xamarin.AndroidX.Annotation` and
+  `Xamarin.AndroidX.Activity`'s latest-version lookups got transposed (each was given the other's
+  version, and Annotation's `1.13.0.1` doesn't exist for that package - `NU1102`), and bumping
+  `Xamarin.AndroidX.Core.Core.Ktx` to its latest version introduced a new floor on plain
+  `Xamarin.AndroidX.Core` (which is also referenced directly, for `NotificationCompat`) that its
+  old pinned version no longer satisfied (`NU1605` again). Fixed by correcting the transposed
+  versions and bumping `Xamarin.AndroidX.Core` to match `Core.Ktx`.
 
 Practically, confidence levels are now:
 
