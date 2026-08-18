@@ -33,6 +33,10 @@
          upstream, and Core.Ktx's own dependency on a specific Core version caused an NU1605
          downgrade error when this was left at an older version. -->
     <PackageReference Include="Xamarin.AndroidX.Core" Version="1.19.0.1" />
+    <!-- Material Components, for the visual refresh (MaterialCardView/MaterialButton/
+         TextInputLayout + a Material theme) - a long-established, mature binding with none of
+         the Kotlin-coroutine/generics surprises the Health Connect library above caused. -->
+    <PackageReference Include="Xamarin.Google.Android.Material" Version="1.14.0.6" />
   </ItemGroup>
 
   <ItemGroup>

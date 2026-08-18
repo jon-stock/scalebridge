@@ -4,6 +4,8 @@ using Android.Bluetooth.LE;
 using Android.Content;
 using Android.OS;
 using Android.Widget;
+using AndroidX.Activity;
+using AndroidX.Activity.Result;
 using ScaleBridge.Ble;
 using ScaleBridge.Health;
 using ScaleBridge.Permissions;
@@ -18,33 +20,56 @@ namespace ScaleBridge;
 /// the app runs unattended via <see cref="Ble.ScaleScanReceiver"/> and
 /// <see cref="Ble.ScaleConnectionService"/> - this Activity is not needed again unless the user
 /// wants to check status or re-run setup.
+///
+/// Extends AndroidX's <see cref="ComponentActivity"/> (rather than the plain framework
+/// <c>Activity</c>) specifically to get <c>RegisterForActivityResult</c>, needed for the Health
+/// Connect permission flow below.
 /// </summary>
 [Activity(Label = "ScaleBridge", MainLauncher = true, LaunchMode = Android.Content.PM.LaunchMode.SingleTop)]
-public class MainActivity : Activity
+public class MainActivity : ComponentActivity
 {
     private const int RequestCodeAndroidPermissions = 1001;
-    private const int RequestCodeHealthConnectPermission = 1002;
     private const long DebugScanDurationMs = 15_000;
 
     private TextView _tvStatus = null!;
-    private TextView _tvScanLog = null!;
+    private TextView _tvScanEmpty = null!;
     private TextView _tvLastSync = null!;
+    private TextView _tvHealthConnectPermissionStatus = null!;
+    private ListView _lvDevices = null!;
     private EditText _etMac = null!;
     private EditText _etName = null!;
 
     private ScanCallback? _debugScanCallback;
     private readonly Dictionary<string, string> _seenDevices = new();
+    private readonly List<string> _deviceAddressesInOrder = new();
+    private ArrayAdapter<string>? _deviceListAdapter;
+
+    private ActivityResultLauncher? _healthPermissionLauncher;
+    private string? _lastHealthConnectPermissionResult;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
+
+        // Must be registered before the activity reaches STARTED - i.e. here in OnCreate, not
+        // lazily when the button is tapped.
+        _healthPermissionLauncher = RegisterForActivityResult(
+            HealthConnectWriter.CreatePermissionRequestContract(),
+            new HealthPermissionResultCallback(this));
+
         SetContentView(Resource.Layout.activity_main);
 
         _tvStatus = FindViewById<TextView>(Resource.Id.tvStatus)!;
-        _tvScanLog = FindViewById<TextView>(Resource.Id.tvScanLog)!;
+        _tvScanEmpty = FindViewById<TextView>(Resource.Id.tvScanEmpty)!;
         _tvLastSync = FindViewById<TextView>(Resource.Id.tvLastSync)!;
+        _tvHealthConnectPermissionStatus = FindViewById<TextView>(Resource.Id.tvHealthConnectPermissionStatus)!;
+        _lvDevices = FindViewById<ListView>(Resource.Id.lvDevices)!;
         _etMac = FindViewById<EditText>(Resource.Id.etMac)!;
         _etName = FindViewById<EditText>(Resource.Id.etName)!;
+
+        _deviceListAdapter = new ArrayAdapter<string>(this, Resource.Layout.list_item_device, Resource.Id.tvDeviceRow, new List<string>());
+        _lvDevices.Adapter = _deviceListAdapter;
+        _lvDevices.ItemClick += OnDeviceRowClicked;
 
         FindViewById<Button>(Resource.Id.btnPermissions)!.Click += (_, _) => RequestAndroidPermissions();
         FindViewById<Button>(Resource.Id.btnHealthConnect)!.Click += (_, _) => RequestHealthConnectPermission();
@@ -75,6 +100,8 @@ public class MainActivity : Activity
             $"Configured: {(configured ? "yes" : "no")}\n" +
             $"Bluetooth/notification permissions granted: {(hasPermissions ? "yes" : "no")}\n" +
             $"Health Connect available: {(healthConnectAvailable ? "yes" : "no")}";
+
+        _tvHealthConnectPermissionStatus.Text = _lastHealthConnectPermissionResult ?? "Not requested yet in this session.";
 
         var lastSync = StatusStore.LastSyncUtc(this);
         var lastWeight = StatusStore.LastWeightKg(this);
@@ -123,14 +150,33 @@ public class MainActivity : Activity
             return;
         }
 
-        // Health Connect's WRITE_WEIGHT permission is a normal Android runtime permission on
-        // Android 14+ (where Health Connect is built into the platform) and is requestable the
-        // same way as any other dangerous permission. On Android 9-13 (separate Health Connect
-        // app), some connect-client versions instead require the
-        // PermissionController.createRequestPermissionResultContract() ActivityResultContract
-        // flow - if this simple request silently does nothing on such a device, see
-        // docs/SETUP.md for the alternative flow to wire up.
-        RequestPermissions(new[] { "android.permission.health.WRITE_WEIGHT" }, RequestCodeHealthConnectPermission);
+        // Health Connect permissions are requested through Health Connect's own permission
+        // screen via this ActivityResultContract - not a plain RequestPermissions call, which
+        // silently does nothing on many devices/versions for this specific permission family.
+        _healthPermissionLauncher?.Launch(HealthConnectWriter.BuildRequiredPermissionSet());
+    }
+
+    /// <summary>Called back (via <see cref="HealthPermissionResultCallback"/>) once the user returns from the Health Connect permission screen.</summary>
+    internal void OnHealthConnectPermissionResult(Java.Lang.Object? result)
+    {
+        bool granted = HealthConnectWriter.GrantedSetIncludesWritePermission(result);
+        _lastHealthConnectPermissionResult = granted
+            ? "Granted - Health Connect writes are allowed."
+            : "Not granted - open the button again, or grant it from Health Connect's own app settings.";
+
+        RunOnUiThread(() =>
+        {
+            Toast.MakeText(this, _lastHealthConnectPermissionResult, ToastLength.Long)!.Show();
+            RefreshStatus();
+        });
+    }
+
+    private sealed class HealthPermissionResultCallback : Java.Lang.Object, IActivityResultCallback
+    {
+        private readonly MainActivity _owner;
+        public HealthPermissionResultCallback(MainActivity owner) => _owner = owner;
+
+        public void OnActivityResult(Java.Lang.Object? result) => _owner.OnHealthConnectPermissionResult(result);
     }
 
     // ---- Step 2: identify the scale ---------------------------------------------------------
@@ -152,7 +198,9 @@ public class MainActivity : Activity
         }
 
         _seenDevices.Clear();
-        _tvScanLog.Text = "Scanning...";
+        _deviceAddressesInOrder.Clear();
+        _deviceListAdapter?.Clear();
+        _tvScanEmpty.Text = "Scanning...";
         _debugScanCallback = new DebugScanCallback(this);
         scanner.StartScan(_debugScanCallback);
 
@@ -167,17 +215,37 @@ public class MainActivity : Activity
                 // Bluetooth may have been toggled off mid-scan; nothing to clean up.
             }
 
-            _tvScanLog.Text = _seenDevices.Count == 0
+            _tvScanEmpty.Text = _seenDevices.Count == 0
                 ? "No BLE devices seen. Make sure the scale is powered on and try again."
-                : string.Join("\n", _seenDevices.Values);
+                : "Tap a device below to fill in its address.";
         }, DebugScanDurationMs);
     }
 
     private void OnDeviceSeen(BluetoothDevice device, int rssi)
     {
         string name = device.Name ?? "(unnamed)";
-        _seenDevices[device.Address] = $"{device.Address}  {name}  rssi={rssi}";
-        RunOnUiThread(() => _tvScanLog.Text = string.Join("\n", _seenDevices.Values));
+        string display = $"{device.Address}\n{name}  rssi={rssi}";
+        bool isNew = !_seenDevices.ContainsKey(device.Address);
+        _seenDevices[device.Address] = display;
+
+        RunOnUiThread(() =>
+        {
+            if (isNew)
+            {
+                _deviceAddressesInOrder.Add(device.Address);
+                _deviceListAdapter?.Add(display);
+            }
+        });
+    }
+
+    private void OnDeviceRowClicked(object? sender, AdapterView.ItemClickEventArgs e)
+    {
+        if (e.Position < 0 || e.Position >= _deviceAddressesInOrder.Count)
+            return;
+
+        string address = _deviceAddressesInOrder[e.Position];
+        _etMac.Text = address;
+        Toast.MakeText(this, $"Filled in {address}", ToastLength.Short)!.Show();
     }
 
     private sealed class DebugScanCallback : ScanCallback

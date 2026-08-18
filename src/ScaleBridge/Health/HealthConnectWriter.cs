@@ -26,6 +26,9 @@ public static class HealthConnectWriter
 {
     private static readonly TimeSpan CallTimeout = TimeSpan.FromSeconds(20);
 
+    public const string WriteWeightPermission = "android.permission.health.WRITE_WEIGHT";
+    private const string PermissionControllerJavaClassName = "androidx.health.connect.client.PermissionController";
+
     public static bool IsAvailable(Context context)
     {
         // HealthConnectClient.getSdkStatus(...) returns SDK_AVAILABLE (3) once Health Connect is
@@ -33,6 +36,50 @@ public static class HealthConnectWriter
         // by the separate Health Connect app (Android 9-13) - Prompt.md Section 5.
         return HealthConnectClient.GetSdkStatus(context) == HealthConnectClient.SdkAvailable;
     }
+
+    /// <summary>
+    /// Builds the <c>ActivityResultContract</c> used to request Health Connect permissions, for
+    /// use with AndroidX Activity's <c>RegisterForActivityResult</c> (see MainActivity.cs) - the
+    /// correct way to request this permission, unlike a plain <c>RequestPermissions</c> call
+    /// (which silently does nothing on many devices, since Health Connect permissions are not
+    /// always wired into the standard OS permission dialog).
+    ///
+    /// Built via Java reflection against the real, confirmed
+    /// <c>PermissionController.createRequestPermissionResultContract()</c> factory
+    /// (androidx.health.connect.client.PermissionController.kt) rather than a direct C# static
+    /// call: <c>PermissionController</c> is a Kotlin interface with a companion `@JvmStatic`
+    /// factory, and - per the `Mass.Kilograms` naming collision found earlier in this file -
+    /// Health Connect's Kotlin bindings have repeatedly surprised us with what the binding
+    /// generator actually ends up calling things. Reflection sidesteps needing to know that at
+    /// all: it only depends on the real, source-confirmed Java class/method name, plus the
+    /// separately-referenced, long-established `AndroidX.Activity` binding for the return type.
+    /// </summary>
+    public static AndroidX.Activity.Result.Contract.ActivityResultContract CreatePermissionRequestContract()
+    {
+        using var controllerClass = Java.Lang.Class.ForName(PermissionControllerJavaClassName);
+        // The real method has a @JvmOverloads default parameter (an optional provider package
+        // name); GetMethod with zero parameter types resolves the generated no-arg overload,
+        // avoiding any need to know/guess the default package name string.
+        using var method = controllerClass.GetMethod("createRequestPermissionResultContract");
+        var result = method.Invoke(null);
+        return (AndroidX.Activity.Result.Contract.ActivityResultContract)result!;
+    }
+
+    /// <summary>The Set&lt;String&gt; of permissions this app needs - just WRITE_WEIGHT.</summary>
+    public static Java.Util.HashSet BuildRequiredPermissionSet()
+    {
+        var set = new Java.Util.HashSet();
+        set.Add(new Java.Lang.String(WriteWeightPermission));
+        return set;
+    }
+
+    /// <summary>
+    /// Given the Set&lt;String&gt; of granted permissions the ActivityResultContract callback
+    /// receives (typed as a plain Java object at the C# call site, since the contract's real
+    /// type parameter is erased), checks whether it includes the one permission this app needs.
+    /// </summary>
+    public static bool GrantedSetIncludesWritePermission(Java.Lang.Object? activityResult) =>
+        activityResult is Java.Util.ISet set && set.Contains(new Java.Lang.String(WriteWeightPermission));
 
     public static async Task WriteWeightAsync(Context context, double weightKg, DateTimeOffset whenUtc)
     {

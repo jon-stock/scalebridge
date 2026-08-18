@@ -22,7 +22,7 @@
 
   <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
-  <application android:label="ScaleBridge" android:allowBackup="true" android:icon="@drawable/appicon">
+  <application android:label="ScaleBridge" android:allowBackup="true" android:icon="@drawable/appicon" android:theme="@style/AppTheme">
 
     <!-- MainActivity itself is declared via the [Activity(MainLauncher = true, ...)] attribute
          in MainActivity.cs, which the build merges in here automatically. Every other component

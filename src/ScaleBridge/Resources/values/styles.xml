@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/brand_primary</item>
+        <item name="colorPrimaryDark">@color/brand_primary_dark</item>
+        <item name="colorAccent">@color/brand_accent</item>
+        <item name="android:windowBackground">@color/brand_background</item>
+        <item name="android:statusBarColor">@color/brand_primary_dark</item>
+    </style>
+
+    <style name="ScaleBridge.SectionCard" parent="Widget.MaterialComponents.CardView">
+        <item name="cardCornerRadius">14dp</item>
+        <item name="cardElevation">2dp</item>
+        <item name="contentPadding">16dp</item>
+        <item name="cardBackgroundColor">@color/brand_surface</item>
+        <item name="android:layout_marginBottom">14dp</item>
+    </style>
+
+    <style name="ScaleBridge.SectionTitle">
+        <item name="android:textSize">15sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/brand_primary_variant</item>
+        <item name="android:paddingBottom">10dp</item>
+        <item name="android:letterSpacing">0.02</item>
+    </style>
+
+    <style name="ScaleBridge.BodyText">
+        <item name="android:textSize">14sp</item>
+        <item name="android:textColor">@color/brand_text_secondary</item>
+    </style>
+
+    <style name="ScaleBridge.Button" parent="Widget.MaterialComponents.Button">
+        <item name="android:layout_marginTop">8dp</item>
+        <item name="backgroundTint">@color/brand_primary</item>
+        <item name="cornerRadius">10dp</item>
+    </style>
+
+    <style name="ScaleBridge.Button.Outlined" parent="Widget.MaterialComponents.Button.OutlinedButton">
+        <item name="android:layout_marginTop">8dp</item>
+        <item name="strokeColor">@color/brand_primary</item>
+        <item name="android:textColor">@color/brand_primary</item>
+        <item name="cornerRadius">10dp</item>
+    </style>
+</resources>

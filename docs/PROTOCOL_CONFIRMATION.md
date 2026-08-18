@@ -223,3 +223,29 @@ including the Health Connect write path. Practically, confidence levels are now:
 - **Still unverified:** the actual GATT behaviour against the real Archonfit unit - no substitute
   for the logcat check described above has been done yet. Do this before trusting the very first
   automatic sync.
+
+## Post-first-install feedback (device testing)
+
+Once installed on a real phone, the "Grant Health Connect write permission" button turned out to
+do nothing visible. The root cause: a plain `RequestPermissions(["android.permission.health.
+WRITE_WEIGHT"], ...)` call - which is what the app originally used, and which the code comments
+even flagged as a possible risk - does not reliably show the system permission dialog for Health
+Connect permissions on many devices/Android versions. The correct mechanism is Health Connect's
+own `PermissionController.createRequestPermissionResultContract()` `ActivityResultContract`,
+which opens Health Connect's own permission screen.
+
+Implementing that switched `MainActivity` from the plain framework `Activity` to AndroidX's
+`ComponentActivity` (needed for `RegisterForActivityResult`), and built the contract itself via
+Java reflection against the real, source-confirmed
+`androidx.health.connect.client.PermissionController.createRequestPermissionResultContract()`
+method - deliberately avoiding yet another guess at what the Health Connect Kotlin binding calls
+things, given how many times that assumption has been wrong so far in this document. This is
+genuinely new, untested binding surface (an `ActivityResultContract<Set<String>, Set<String>>`
+return type, `AndroidX.Activity`'s own generic-erased `RegisterForActivityResult`/
+`ActivityResultLauncher` API), so - consistent with everything else Health Connect has touched in
+this project - treat it as unverified until it's actually been exercised on a device.
+
+Two other changes made at the same time, both much lower-risk (standard, long-established Android
+APIs, no Kotlin/Health-Connect binding involved): the debug BLE scan results are now a tappable
+list that fills in the MAC address field directly, and the whole screen was restyled using
+Material Components (`Xamarin.Google.Android.Material`) instead of plain unstyled widgets.
