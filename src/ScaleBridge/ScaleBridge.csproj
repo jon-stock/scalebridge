@@ -44,8 +44,20 @@
 
          Repository="Google" is required: AndroidMavenLibrary defaults to Maven Central, but
          AndroidX artifacts (including this one) are published to Google's Maven repository
-         instead, not mirrored to Central - omitting this caused a 404 on the first CI build. -->
-    <AndroidMavenLibrary Include="androidx.health.connect:connect-client" Version="1.1.0-alpha07" Repository="Google" />
+         instead, not mirrored to Central - omitting this caused a 404 on the first CI build.
+
+         VerifyDependencies="false" disables the build's Java dependency verification (XAJDV) for
+         this library specifically. Seven of its eight transitive Java dependencies were fixed
+         properly below via explicit PackageReferences; the eighth, com.google.guava:
+         listenablefuture:1.0, is a case XAJDV cannot verify correctly: modern Guava (see
+         Xamarin.Google.Guava below) bundles the real ListenableFuture class internally and only
+         depends on an intentionally-empty placeholder release of the standalone artifact (to
+         avoid a duplicate-class conflict between the two). Referencing the real, non-empty
+         listenablefuture:1.0 package instead of that placeholder would reintroduce exactly that
+         duplicate-class conflict, so the placeholder (pinned below) is the correct choice, and
+         XAJDV's "not satisfied" complaint here is a false positive it isn't equipped to
+         understand rather than a real missing dependency. -->
+    <AndroidMavenLibrary Include="androidx.health.connect:connect-client" Version="1.1.0-alpha07" Repository="Google" VerifyDependencies="false" />
   </ItemGroup>
 
   <ItemGroup>

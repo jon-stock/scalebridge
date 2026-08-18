@@ -109,8 +109,19 @@ with the protocol logic:
   version, and Annotation's `1.13.0.1` doesn't exist for that package - `NU1102`), and bumping
   `Xamarin.AndroidX.Core.Core.Ktx` to its latest version introduced a new floor on plain
   `Xamarin.AndroidX.Core` (which is also referenced directly, for `NotificationCompat`) that its
-  old pinned version no longer satisfied (`NU1605` again). Fixed by correcting the transposed
+  old pinned version no longer satisfied (  `NU1605` again). Fixed by correcting the transposed
   versions and bumping `Xamarin.AndroidX.Core` to match `Core.Ktx`.
+- With all seven other transitive dependencies satisfied, XAJDV still rejected
+  `com.google.guava:listenablefuture:1.0` even though it's pinned (correctly) to a real NuGet
+  version. This one is a genuine limitation of XAJDV rather than a mistake: modern Guava (see
+  `Xamarin.Google.Guava` in `ScaleBridge.csproj`) bundles the real `ListenableFuture` class
+  internally and depends on a deliberately-empty placeholder release of the standalone artifact
+  purely to avoid a duplicate-class conflict between the two. Referencing the *real* artifact
+  instead of that placeholder would reintroduce the exact conflict Guava's placeholder trick
+  exists to avoid, so the placeholder pin is correct and XAJDV simply can't see that Guava
+  already satisfies the requirement. Fixed by adding `VerifyDependencies="false"` to the
+  `connect-client` `AndroidMavenLibrary` item, after fixing the other seven dependencies for
+  real - see the comment above that item in `ScaleBridge.csproj`.
 
 Practically, confidence levels are now:
 
