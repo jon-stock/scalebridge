@@ -206,18 +206,20 @@ interface directly on `WeightRecord` in `Health/RecordInterfaceFixups.cs`. Unlik
 `IComparable` fixups, no member stub was needed here, since `WeightRecord` already has a
 compatible `Metadata` member for C# to satisfy the interface with implicitly.
 
-Practically, confidence levels are now:
+**As of this point, the app builds and signs cleanly in CI** (`.github/workflows/build-apk.yml`),
+including the Health Connect write path. Practically, confidence levels are now:
 
-- **High confidence, and now compiling in CI:** `QnFrameParser` (pure C#, no Android types,
-  ported line-by-line from a real, current, actively-maintained reference implementation) and the
+- **High confidence, and compiling in CI:** `QnFrameParser` (pure C#, no Android types, ported
+  line-by-line from a real, current, actively-maintained reference implementation) and the
   general BLE scan/GATT/service structure (standard, long-established Android APIs).
-- **Still needs verification on the next CI run:** the Health Connect write path in
-  `src/ScaleBridge/Health/`. `androidx.health.connect:connect-client` is a Kotlin library whose
-  `insertRecords(...)` call is a `suspend fun`; calling it from C#/Java interop requires bridging
-  a `kotlin.coroutines.Continuation`, and the exact C# names the .NET binding generator produces
-  for that (and for the `Mass`/`WeightRecord`/`InsertRecordsResponse` types) had not been checked
-  against a real build as of the first CI run. See the comments at the top of
-  `HealthConnectWriter.cs` and `KotlinContinuationBridge.cs` for exactly what to check and fix if
-  a future build reports errors there.
+- **Now compiling, but functionally unverified:** the Health Connect write path in
+  `src/ScaleBridge/Health/`. Every binding-generator gap and naming mismatch it hit has been
+  fixed and explained above, and the code now builds - but none of it has actually run against a
+  real Health Connect instance yet (no emulator/device was available in the environment that
+  fixed these compile errors). The `Mass.Kilograms` reflection workaround in particular
+  (`CreateMassInKilograms` in `HealthConnectWriter.cs`) should be treated as unverified until a
+  real sync has been observed to actually appear in Health Connect - if it throws at runtime,
+  that function is the first place to look.
 - **Still unverified:** the actual GATT behaviour against the real Archonfit unit - no substitute
-  for the logcat check described above has been done yet.
+  for the logcat check described above has been done yet. Do this before trusting the very first
+  automatic sync.
