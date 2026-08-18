@@ -249,3 +249,10 @@ Two other changes made at the same time, both much lower-risk (standard, long-es
 APIs, no Kotlin/Health-Connect binding involved): the debug BLE scan results are now a tappable
 list that fills in the MAC address field directly, and the whole screen was restyled using
 Material Components (`Xamarin.Google.Android.Material`) instead of plain unstyled widgets.
+
+That styling pass did hit one real (Android-tooling, not Health-Connect-related) issue:
+`ScaleBridge.SectionTitle` and `ScaleBridge.BodyText` in `styles.xml` had no explicit `parent`
+attribute. Android's build tooling auto-derives an implicit parent from everything before the
+last dot in a style's name when `parent` is omitted (a real behaviour, not just a naming
+convention) - so it looked for a style literally named `ScaleBridge` and failed to link
+resources. Fixed by adding an explicit empty `parent=""` to both.
