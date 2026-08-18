@@ -45,4 +45,20 @@
     <AndroidMavenLibrary Include="androidx.health.connect:connect-client" Version="1.1.0-alpha07" Repository="Google" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- connect-client's transitive Java dependencies (Kotlin stdlib/coroutines, Guava,
+         AndroidX Core/Annotation/Activity). The .NET Android build's dependency verification
+         step (XAJDV) requires these to be satisfied by Microsoft-maintained NuGet bindings
+         instead of letting the same Java libraries get bound a second time via Maven - each
+         version below is the latest revision of the exact version XAJDV asked for. -->
+    <PackageReference Include="Xamarin.KotlinX.Coroutines.Guava" Version="1.7.3.3" />
+    <PackageReference Include="Xamarin.KotlinX.Coroutines.Android" Version="1.7.3.3" />
+    <PackageReference Include="Xamarin.Kotlin.StdLib" Version="1.8.22" />
+    <PackageReference Include="Xamarin.Google.Guava.ListenableFuture" Version="1.0.0.32" />
+    <PackageReference Include="Xamarin.Google.Guava" Version="31.1.0.10" />
+    <PackageReference Include="Xamarin.AndroidX.Core.Core.Ktx" Version="1.12.0.4" />
+    <PackageReference Include="Xamarin.AndroidX.Annotation" Version="1.2.0.4" />
+    <PackageReference Include="Xamarin.AndroidX.Activity" Version="1.2.0.1" />
+  </ItemGroup>
+
 </Project>

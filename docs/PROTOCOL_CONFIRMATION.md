@@ -89,6 +89,11 @@ with the protocol logic:
   `AndroidMavenLibrary` defaults to resolving from Maven Central, but AndroidX artifacts
   (including this one) are published to Google's Maven repository and are not mirrored to
   Central. Fixed by adding `Repository="Google"` to that item in `ScaleBridge.csproj`.
+- Once that resolved, the build's Java dependency verification step (XAJDV) rejected
+  `connect-client`'s transitive Java dependencies (Kotlin stdlib/coroutines, Guava, AndroidX
+  Core/Annotation/Activity) because Microsoft already maintains NuGet bindings for all of them
+  and expects those referenced explicitly rather than re-bound from Maven. Fixed by adding the
+  eight `PackageReference`s XAJDV named, each pinned to the exact version it asked for.
 
 Practically, confidence levels are now:
 
