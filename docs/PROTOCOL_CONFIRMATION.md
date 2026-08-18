@@ -159,6 +159,14 @@ useful ones, unlike the environment/versioning noise above:
   completing the missing interface member in ordinary C# (`Health/UnitsComparableFixups.cs`)
   rather than via a metadata transform - ScaleBridge never actually calls `CompareTo` on any of
   them, so each stub only needs to satisfy the compiler.
+- That first attempt implemented `System.IComparable` and compiled cleanly, but the identical
+  error persisted unchanged on the next build - a sign the fix targeted the wrong interface
+  entirely rather than being incomplete. The interface the compiler actually needs implemented is
+  `Java.Lang.IComparable` (the bound `java.lang.Comparable` interface, whose `CompareTo` takes a
+  `Java.Lang.Object`), a real, long-standing part of Mono.Android, not `System.IComparable` (the
+  BCL interface, whose `CompareTo` takes a plain `object`) - the two are unrelated types that
+  happen to share a short name. Fixed by reimplementing each stub in
+  `Health/UnitsComparableFixups.cs` against `Java.Lang.IComparable` instead.
 
 Practically, confidence levels are now:
 
