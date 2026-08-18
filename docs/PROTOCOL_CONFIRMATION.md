@@ -404,3 +404,38 @@ which was missing both:
 
 Both are now declared; this should let the normal Health Connect grant screen appear instead of
 the redirect message.
+
+## Crash loop: "Unable to instantiate receiver ... ClassNotFoundException"
+
+After the connection fix above (adding the missing `<intent-filter>`), `ScaleScanReceiver` finally
+started actually being triggered by the OS for the first time - and immediately crashed on every
+single trigger, fast enough (each retriggered by the scale re-advertising) to look like a crash
+loop that couldn't be read. The full exception, eventually captured via the crash screen, was
+unambiguous:
+
+```
+Java.Lang.RuntimeException: Unable to instantiate receiver uk.co.accessuk.scalebridge.Ble.ScaleScanReceiver
+ ---> Java.Lang.ClassNotFoundException: Didn't find class "uk.co.accessuk.scalebridge.Ble.ScaleScanReceiver" ...
+```
+
+Root cause: **.NET for Android does not give a managed class a Java name that literally matches
+its C# namespace by default.** It generates a hashed name instead (confirmed from an earlier
+crash log: `MainActivity`'s real Java class name is `crc6427e3e38310646c4d.MainActivity`, not
+`uk.co.accessuk.scalebridge.MainActivity`) - that only appears correct in the manifest for
+`MainActivity` because it's registered via the `[Activity(...)]` C# attribute, which makes the
+build tool write the correct (hashed) name into the manifest automatically.
+
+`ScaleScanReceiver`, `BootCompletedReceiver`, and `ScaleConnectionService` were all, by contrast,
+hand-declared directly in `Properties/AndroidManifest.xml` (a deliberate choice for auditability -
+see the comment at the top of that file), using relative names like `.Ble.ScaleScanReceiver`.
+Android resolves that to the literal Java class `uk.co.accessuk.scalebridge.Ble.ScaleScanReceiver`
+- which never existed, since none of the three classes had anything forcing their generated Java
+name to match. **This means all three hand-declared components have been broken this way since
+the very first version of the manifest** - `ScaleScanReceiver` is simply the first of the three
+to have ever actually been triggered by the OS (`BootCompletedReceiver` needs an actual reboot;
+`ScaleConnectionService` is only started by `ScaleScanReceiver`, which itself only started
+working two fixes ago).
+
+Fixed with `[Register("...")]` on all three classes - the standard, documented mechanism for
+forcing a class's generated Java name to match a specific hand-written value, letting a manifest
+entry like `.Ble.ScaleScanReceiver` correctly resolve to the intended C# type.

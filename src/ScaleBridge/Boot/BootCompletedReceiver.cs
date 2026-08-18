@@ -13,7 +13,11 @@ namespace ScaleBridge.Boot;
 /// reliability requirement.
 /// </summary>
 // Declared explicitly in Properties/AndroidManifest.xml (not via attributes) - see
-// ScaleScanReceiver for why this project keeps manifest component wiring manual.
+// ScaleScanReceiver for why this project keeps manifest component wiring manual, and for why
+// [Register] below is required (the same Java-class-name mismatch that crashed
+// ScaleScanReceiver applies here too - this receiver just hadn't been triggered yet, since that
+// only happens after an actual device reboot).
+[Android.Runtime.Register("uk.co.accessuk.scalebridge.Boot.BootCompletedReceiver")]
 public class BootCompletedReceiver : BroadcastReceiver
 {
     private const string LogTag = "ScaleBridge.Boot";

@@ -14,6 +14,17 @@ namespace ScaleBridge.Ble;
 /// </summary>
 // Declared explicitly in Properties/AndroidManifest.xml (not via attributes) so the exported
 // receiver + intent-filter wiring for the scan-wake broadcast is easy to audit in one place.
+//
+// [Register] is required, not optional, for that hand-written manifest entry to actually work:
+// .NET for Android does not give managed classes a Java name that literally matches their C#
+// namespace by default (it generates a hashed name instead, e.g. MainActivity's real Java name
+// is "crc6427e3e38310646c4d.MainActivity" - only correct in the manifest because [Activity]
+// generates that entry for us). Properties/AndroidManifest.xml's ".Ble.ScaleScanReceiver" entry
+// resolves to the literal Java class "uk.co.accessuk.scalebridge.Ble.ScaleScanReceiver", which
+// did not exist without this attribute forcing it - causing
+// "Unable to instantiate receiver ...: ClassNotFoundException" the first time this receiver was
+// ever actually triggered by the OS (see docs/PROTOCOL_CONFIRMATION.md).
+[Android.Runtime.Register("uk.co.accessuk.scalebridge.Ble.ScaleScanReceiver")]
 public class ScaleScanReceiver : BroadcastReceiver
 {
     private const string LogTag = "ScaleBridge.Scan";

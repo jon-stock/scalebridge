@@ -18,7 +18,11 @@ namespace ScaleBridge.Ble;
 /// broadcast.
 /// </summary>
 // Declared explicitly in Properties/AndroidManifest.xml (not via attributes) - see
-// ScaleScanReceiver for why this project keeps manifest component wiring manual.
+// ScaleScanReceiver for why this project keeps manifest component wiring manual, and for why
+// [Register] below is required (the same Java-class-name mismatch that crashed
+// ScaleScanReceiver applies here too - this service just hadn't been started yet, since that
+// only happens once ScaleScanReceiver itself successfully runs).
+[Android.Runtime.Register("uk.co.accessuk.scalebridge.Ble.ScaleConnectionService")]
 public class ScaleConnectionService : Service
 {
     public const string ExtraDeviceAddress = "device_address";
