@@ -281,6 +281,31 @@ crash text, which - per point 1 - should now be visible in the app itself after 
 install), but it directly addresses the two most likely candidates and ensures the app is no
 longer a black box if something else was actually responsible.
 
+That build was installed and still crashed immediately - before the app visibly opened at all,
+i.e. before `MainActivity`'s "Last crash" card could ever have had a chance to render, since that
+card depends on the app surviving long enough to show its main screen even once. This pointed at
+a gap in the previous fix rather than disproving it: persisting the crash to SharedPreferences is
+useless if the *next* launch attempt fails at the same early point every time, which a
+deterministic startup bug would do.
+
+Fixed by decoupling crash *visibility* from `MainActivity` entirely:
+
+- `CrashActivity.cs` is a dedicated, minimal crash screen built entirely in plain code (no layout
+  resource, no Material Components, no app theme/styles) - specifically so it doesn't depend on
+  anything that could plausibly be part of whatever just broke.
+- `ScaleBridgeApplication`'s crash handler now launches `CrashActivity` directly the moment any
+  unhandled exception is caught, instead of only persisting the text for `MainActivity` to show
+  later.
+- `CrashLog.Record` additionally writes the exception to a plain text file
+  (`Android/data/uk.co.accessuk.scalebridge/files/crash_log.txt`), recoverable via USB/MTP or
+  `adb pull` even if no on-screen crash UI manages to appear at all.
+
+If a crash still shows nothing whatsoever after this - not even the dedicated crash screen, and
+no file at that path - that would point to something happening at a lower level than managed
+.NET/Java code can intercept (e.g. a native/JNI-level failure during process or library
+initialization), which genuinely cannot be diagnosed further without `adb logcat` access to the
+device at the moment of the crash.
+
 ## Icon and notification icon
 
 Replaced the placeholder flat icon with a proper Android adaptive icon (`mipmap-anydpi-v26/

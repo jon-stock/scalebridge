@@ -112,11 +112,31 @@ minute logcat check (`adb logcat -s ScaleBridge.Qn`), not a rebuild.
 
 ## If the app crashes
 
-Open the app again - a "Last crash" card appears at the top of the screen if one was recorded,
-with the full exception text (long-press to select/copy it) and a "Clear" button. This works
-without `adb`, which is useful given this app is normally sideloaded onto a single personal phone.
+A crash immediately shows a dedicated, minimal crash screen with the full exception text
+(long-press to select/copy it, or use its Share button to send the text to yourself). This screen
+is launched directly by a global crash handler the moment anything goes wrong, independently of
+whatever just crashed - including a crash during `MainActivity`'s own startup, before it can show
+anything itself (its own "Last crash" card, shown when you next open the app normally, only helps
+for crashes *after* the main screen has successfully rendered at least once).
+
+The same details are also written to a plain text file, in case even that crash screen can't be
+shown for some reason:
+
+```
+Android/data/uk.co.accessuk.scalebridge/files/crash_log.txt
+```
+
+This needs no special permissions to write (it's the app's own app-specific storage) but Android
+11+ often hides `Android/data` from on-device file manager apps directly - the most reliable way
+to reach it is to plug the phone into a PC over USB and browse to that path (exposed via MTP), or
+use a file manager app that has "All files access" granted.
+
 If you do have `adb` available, `adb logcat -s AndroidRuntime:E DEBUG:E` around the time of the
-crash is the equivalent view.
+crash is the equivalent view, and `adb pull` can fetch the same crash log file directly:
+
+```
+adb pull /storage/emulated/0/Android/data/uk.co.accessuk.scalebridge/files/crash_log.txt
+```
 
 ## Known limitation: reboot re-arming
 

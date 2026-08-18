@@ -3,28 +3,37 @@ using Android.Content;
 namespace ScaleBridge.Status;
 
 /// <summary>
-/// Persists the last unhandled crash so it can be read directly from the app's own screen -
-/// installed via <see cref="ScaleBridgeApplication"/> as early as possible (before any Activity's
-/// OnCreate runs), so this catches crashes that happen very early during startup too. Exists
-/// specifically because this app is sideloaded onto a single personal device with no `adb`
-/// access readily available, so logcat isn't a practical way to diagnose a crash - this makes the
-/// exception text visible (and copyable, via long-press) directly in the app.
+/// Persists the last unhandled crash two ways, so it can be recovered without `adb` (this app is
+/// normally sideloaded onto a single personal phone, where logcat isn't practically available):
+///
+/// 1. SharedPreferences, read back by MainActivity's "Last crash" card - but this only helps if
+///    the app gets far enough to actually show that screen.
+/// 2. A plain text file at a fixed, well-known path
+///    (Android/data/uk.co.accessuk.scalebridge/files/crash_log.txt on the phone's internal
+///    storage), which needs no permissions to write (it's this app's own app-specific external
+///    storage directory) and can be read by plugging the phone into a PC over USB (exposed via
+///    MTP) even when the app itself cannot render any UI at all - see
+///    <see cref="ScaleBridgeApplication"/>, which additionally tries to launch a standalone,
+///    dependency-free crash screen directly.
 /// </summary>
 public static class CrashLog
 {
     private const string PrefsName = "scale_bridge_crash";
     private const string KeyText = "last_crash_text";
     private const string KeyUtcTicks = "last_crash_utc_ticks";
+    public const string CrashFileName = "crash_log.txt";
 
     private static ISharedPreferences Prefs(Context context) =>
         context.GetSharedPreferences(PrefsName, FileCreationMode.Private)!;
 
     public static void Record(Context context, Exception exception)
     {
+        string text = exception.ToString();
+
         try
         {
             using var editor = Prefs(context).Edit()!;
-            editor.PutString(KeyText, exception.ToString());
+            editor.PutString(KeyText, text);
             editor.PutLong(KeyUtcTicks, DateTimeOffset.UtcNow.UtcTicks);
             // Commit() (synchronous) rather than Apply(): this often runs moments before the
             // process is torn down by the crash, so the write must complete immediately.
@@ -33,6 +42,20 @@ public static class CrashLog
         catch
         {
             // Never let the crash-logging path itself throw from inside an exception handler.
+        }
+
+        try
+        {
+            var dir = context.GetExternalFilesDir(null);
+            if (dir is not null)
+            {
+                string path = System.IO.Path.Combine(dir.AbsolutePath, CrashFileName);
+                System.IO.File.WriteAllText(path, $"{DateTimeOffset.UtcNow:u}\n\n{text}\n");
+            }
+        }
+        catch
+        {
+            // As above - this is a best-effort secondary copy, never let it throw.
         }
     }
 
