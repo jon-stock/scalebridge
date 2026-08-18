@@ -49,16 +49,28 @@
     <!-- connect-client's transitive Java dependencies (Kotlin stdlib/coroutines, Guava,
          AndroidX Core/Annotation/Activity). The .NET Android build's dependency verification
          step (XAJDV) requires these to be satisfied by Microsoft-maintained NuGet bindings
-         instead of letting the same Java libraries get bound a second time via Maven - each
-         version below is the latest revision of the exact version XAJDV asked for. -->
-    <PackageReference Include="Xamarin.KotlinX.Coroutines.Guava" Version="1.7.3.3" />
-    <PackageReference Include="Xamarin.KotlinX.Coroutines.Android" Version="1.7.3.3" />
-    <PackageReference Include="Xamarin.Kotlin.StdLib" Version="1.8.22" />
-    <PackageReference Include="Xamarin.Google.Guava.ListenableFuture" Version="1.0.0.32" />
-    <PackageReference Include="Xamarin.Google.Guava" Version="31.1.0.10" />
-    <PackageReference Include="Xamarin.AndroidX.Core.Core.Ktx" Version="1.12.0.4" />
-    <PackageReference Include="Xamarin.AndroidX.Annotation" Version="1.2.0.4" />
-    <PackageReference Include="Xamarin.AndroidX.Activity" Version="1.2.0.1" />
+         instead of letting the same Java libraries get bound a second time via Maven.
+
+         These are pinned to each package's latest available NuGet version, not the bare minimum
+         XAJDV originally asked for: Xamarin.AndroidX.Core (referenced above) transitively
+         requires higher floors of several of these same packages (e.g. via
+         Xamarin.AndroidX.Lifecycle.Runtime.Android), and pinning to the bare minimum caused
+         NU1605 package-downgrade errors once that chain was taken into account. Taking the
+         latest of each avoids continuing to chase individual floors one at a time.
+
+         Xamarin.Google.Guava.ListenableFuture=9999.0.0 looks wrong but is correct: recent Guava
+         versions depend on a real, deliberately-named "9999.0.0" placeholder release of
+         listenablefuture (Guava's own upstream convention for signalling "get this class from
+         Guava itself, not from the standalone artifact") - see
+         https://github.com/google/guava/releases/tag/v27.0. -->
+    <PackageReference Include="Xamarin.KotlinX.Coroutines.Guava" Version="1.11.0.1" />
+    <PackageReference Include="Xamarin.KotlinX.Coroutines.Android" Version="1.11.0.1" />
+    <PackageReference Include="Xamarin.Kotlin.StdLib" Version="2.4.0.1" />
+    <PackageReference Include="Xamarin.Google.Guava.ListenableFuture" Version="9999.0.0" />
+    <PackageReference Include="Xamarin.Google.Guava" Version="33.6.0.1" />
+    <PackageReference Include="Xamarin.AndroidX.Core.Core.Ktx" Version="1.19.0.1" />
+    <PackageReference Include="Xamarin.AndroidX.Annotation" Version="1.13.0.1" />
+    <PackageReference Include="Xamarin.AndroidX.Activity" Version="1.10.0.1" />
   </ItemGroup>
 
 </Project>

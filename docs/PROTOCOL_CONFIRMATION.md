@@ -93,7 +93,17 @@ with the protocol logic:
   `connect-client`'s transitive Java dependencies (Kotlin stdlib/coroutines, Guava, AndroidX
   Core/Annotation/Activity) because Microsoft already maintains NuGet bindings for all of them
   and expects those referenced explicitly rather than re-bound from Maven. Fixed by adding the
-  eight `PackageReference`s XAJDV named, each pinned to the exact version it asked for.
+  eight `PackageReference`s XAJDV named.
+- Pinning those eight to the exact minimum versions XAJDV first asked for then caused NU1605
+  package-downgrade errors: `Xamarin.AndroidX.Core` (already referenced for the status
+  notification) transitively requires higher floors of several of the same packages via its own
+  dependency chain (e.g. `Xamarin.AndroidX.Lifecycle.Runtime.Android` -> a newer
+  `Xamarin.KotlinX.Coroutines.Android`). Fixed by bumping all eight to their latest available
+  NuGet version instead of the bare minimum, which satisfies every floor at once rather than
+  chasing them one at a time. See the comment above the `PackageReference`s in
+  `ScaleBridge.csproj` for the one that looks wrong but isn't
+  (`Xamarin.Google.Guava.ListenableFuture` at version `9999.0.0`, a deliberate Guava placeholder
+  version).
 
 Practically, confidence levels are now:
 
