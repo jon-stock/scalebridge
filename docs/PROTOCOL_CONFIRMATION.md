@@ -196,6 +196,16 @@ all straightforward once seen:
   didn't compile; replaced with a plain `ToString()` on the raw `Java.Lang.Object`, since that
   path only needs a diagnostic string, not the real exception type.
 
+That left one remaining error: `WeightRecord` doesn't convert to `IRecord` at all ("cannot
+convert from WeightRecord to IRecord"), even though `Record` (confirmed against the real
+AndroidX source) is a trivial one-member interface (`metadata: Metadata`) that `WeightRecord`
+already implements via its constructor. This is the same category of gap as the earlier
+`IComparable`/`ActivityResultContract` issues - a missing interface declaration somewhere in the
+generated binding hierarchy - rather than an incomplete one. Fixed the same way: declaring the
+interface directly on `WeightRecord` in `Health/RecordInterfaceFixups.cs`. Unlike the
+`IComparable` fixups, no member stub was needed here, since `WeightRecord` already has a
+compatible `Metadata` member for C# to satisfy the interface with implicitly.
+
 Practically, confidence levels are now:
 
 - **High confidence, and now compiling in CI:** `QnFrameParser` (pure C#, no Android types,
