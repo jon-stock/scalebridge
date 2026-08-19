@@ -597,6 +597,53 @@ running on the real device - if a fourth error appears, it should at least now c
 stack trace (per the previous section's diagnostics work) pointing at exactly which
 `LoadClass`/`GetMethod`/`GetConstructor`/`NewInstance` call failed and why.
 
+## Fourth Health Connect error: `NoSuchMethodException: ...Metadata.manualEntry []`
+
+Right on cue - the fourth error predicted above, with a full stack trace this time:
+
+```
+Java.Lang.ReflectiveOperationException: androidx.health.connect.client.records.metadata.Metadata.manualEntry []
+  at Java.Lang.Class.GetMethod(String, Class[])
+  at ScaleBridge.Health.HealthConnectWriter.CreateWeightRecord(...)
+java.lang.NoSuchMethodException: androidx.health.connect.client.records.metadata.Metadata.manualEntry []
+```
+
+Progress: `Metadata` itself now loads fine (the `Context.getClassLoader()` fix above worked). This
+is a new, narrower problem: `metadataClass.GetMethod("manualEntry")` (zero parameter types) found
+no matching *public* method directly on the `Metadata` class. The real Kotlin function is
+`@JvmStatic @JvmOverloads fun manualEntry(device: Device? = null): Metadata` on `Metadata`'s
+companion object - `@JvmStatic` is supposed to additionally bridge companion functions onto the
+outer class as plain static methods, which is what the previous fix assumed would make
+`Metadata.manualEntry()` reachable directly. Empirically, on this device/library build, that
+specific zero-argument bridge does not exist on the outer `Metadata` class (whether because
+`@JvmStatic`+`@JvmOverloads` together don't bridge every reduced-arity overload for some Kotlin
+compiler version, or some other detail) - even though the function obviously has a real
+implementation *somewhere* (either a differently-shaped bridge on `Metadata`, or - guaranteed - a
+real instance method on the actual `Metadata.Companion` object, since that's what any `@JvmStatic`
+bridge would itself be calling).
+
+Rather than guess a fourth specific (class, method name, arity) combination and risk a fifth wrong
+guess, `CreateWeightRecord` now calls a new `FindAndInvokeManualEntry` helper that discovers the
+right call at runtime instead of hard-coding it:
+
+1. Lists every public method on `Metadata` itself via `Class.GetMethods()` (not `GetMethod(name)`,
+   which requires knowing the exact parameter types up front), looking for one named
+   `manualEntry` with 0 or 1 parameters, and calls it statically (`receiver = null`) if found.
+2. If nothing usable was found there, reads the real `Metadata.Companion` field's value (a plain
+   `Class.GetField("Companion")` - guaranteed to exist and be public for any ordinary,
+   non-explicitly-private Kotlin companion object) and asks that actual instance for its own
+   runtime `Class` (`companion.Class`, not a guessed `"Metadata$Companion"` string) - guaranteed
+   to have a real, callable `manualEntry` instance method, since that's what any `@JvmStatic`
+   bridge on the outer class would itself have been delegating to - then does the same
+   0-or-1-parameter search and call against that.
+
+This is more code than one hard-coded call, but after three wrong guesses in a row about this
+library's exact Kotlin-to-JVM bridging shape, discovering the real, reachable method at runtime is
+more reliable than continuing to guess. `CreatePermissionRequestContract`'s equivalent
+`GetMethod("createRequestPermissionResultContract")` call is left as-is (a plain, ordinary
+interface companion function with no `@JvmOverloads` reduced-arity complication, and not
+implicated in any failure seen so far).
+
 ## Crash: `startForegroundService() not allowed due to mAllowStartForeground false`
 
 A real-device crash, unrelated to Health Connect - this one is `ScaleScanReceiver.OnReceive`

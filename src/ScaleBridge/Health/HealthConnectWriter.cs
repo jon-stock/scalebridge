@@ -160,7 +160,7 @@ public static class HealthConnectWriter
     /// <see cref="WeightRecord"/> type (not the untyped reflection result), so the rest of this
     /// method can use it exactly as before.
     ///
-    /// This has already gone through two failed fix attempts on a real device, both replaced
+    /// This has already gone through three failed fix attempts on a real device, all replaced
     /// here - see docs/PROTOCOL_CONFIRMATION.md for the full history:
     ///
     /// 1. Looking up every class here by name via <c>Java.Lang.Class.ForName(name)</c>. Built and
@@ -186,14 +186,35 @@ public static class HealthConnectWriter
     ///    affected). That specific call was caught by `MainActivity`'s existing defensive
     ///    try/catch, which is also why "Health Connect available" showed as unavailable/disabled
     ///    afterwards - not a real availability check failure, a swallowed startup exception.
+    /// 3. Switching to <c>Context.getClassLoader()</c> for every class lookup (fixing both of the
+    ///    above), but still assuming <c>Metadata.manualEntry()</c> (zero-argument) existed as a
+    ///    plain <c>public static</c> method directly on the outer <c>Metadata</c> class - the
+    ///    <c>@JvmStatic</c> annotation on a companion function is *supposed* to bridge it there.
+    ///    Built and ran, but threw <c>NoSuchMethodException:
+    ///    androidx.health.connect.client.records.metadata.Metadata.manualEntry []</c> from
+    ///    <c>Class.GetMethod("manualEntry")</c> - that specific zero-argument bridge evidently
+    ///    isn't generated on the outer class for this function (whether because
+    ///    <c>@JvmStatic</c>+<c>@JvmOverloads</c> together don't bridge every reduced-arity
+    ///    overload, or some other Kotlin-compiler-version-specific detail), even though the
+    ///    one-argument <c>manualEntry(Device)</c> form and/or the real implementation on
+    ///    <c>Metadata$Companion</c> presumably still exist somewhere.
     ///
-    /// Fixed (for both this method and <see cref="CreatePermissionRequestContract"/>) by using
-    /// only the plain, standard <c>Context.getClassLoader()</c> - the single app classloader that
-    /// loads every class in the APK, including this Maven-resolved library, with no Xamarin/Mono
-    /// binding-generator involvement at all - and loading every class needed here by name through
-    /// it, rather than mixing in `FromType`/`ForName` for the ones that "should" already have a
-    /// working binding. `Mass`-via-`FromType` in <see cref="CreateMassInKilograms"/> is left as-is
-    /// since it's the one part of this whole area actually confirmed working on a real device.
+    /// Fixed by no longer guessing a single specific (declaring class, method name, arity)
+    /// combination at all: <see cref="FindAndInvokeManualEntry"/> below searches the real,
+    /// actually-reachable public methods at runtime - first every public method directly on
+    /// <c>Metadata</c> (in case a compatible static bridge does exist), then every public
+    /// instance method on the singleton <c>Metadata.Companion</c> object (which is *guaranteed*
+    /// to have a real, callable implementation of every companion function, since that's what
+    /// <c>@JvmStatic</c> bridges are bridging *to* - obtained via the actual companion field's
+    /// value's own <see cref="Java.Lang.Object.Class"/>, not a guessed
+    /// <c>"Metadata$Companion"</c> class name) - and calls whichever `manualEntry` overload it
+    /// finds first, with zero or one (null) arguments as appropriate. This is more code than
+    /// hard-coding one exact call, but after three wrong guesses about this library's exact
+    /// Kotlin-to-JVM bridging shape in a row, discovering it at runtime is more reliable than a
+    /// fourth guess. `CreatePermissionRequestContract`'s equivalent zero-argument
+    /// `createRequestPermissionResultContract()` lookup is left as a direct `GetMethod` call
+    /// since that one is confirmed working (it's an ordinary interface companion function, not
+    /// one combining `@JvmStatic` with `@JvmOverloads` on a reduced-arity overload like this one).
     /// </summary>
     private static WeightRecord CreateWeightRecord(Context context, Java.Time.Instant instant, Mass weight)
     {
@@ -204,14 +225,85 @@ public static class HealthConnectWriter
         using var massClass = classLoader.LoadClass(MassJavaClassName)!;
         using var metadataClass = classLoader.LoadClass(MetadataJavaClassName)!;
 
-        // manualEntry() is @JvmOverloads with a single optional `device` parameter, so the JVM
-        // also exposes a genuine zero-argument overload - no need to pass a null Device through.
-        using var manualEntryMethod = metadataClass.GetMethod("manualEntry");
-        using var metadata = manualEntryMethod.Invoke(null);
+        using var metadata = FindAndInvokeManualEntry(metadataClass);
 
         using var constructor = weightRecordClass.GetConstructor(instantClass, zoneOffsetClass, massClass, metadataClass);
         var result = constructor.NewInstance(instant, null, weight, metadata);
         return (WeightRecord)result!;
+    }
+
+    /// <summary>
+    /// Finds and calls a callable <c>manualEntry</c> overload for <paramref name="metadataClass"/>
+    /// (<c>androidx.health.connect.client.records.metadata.Metadata</c>), without assuming in
+    /// advance whether it's a zero- or one-argument overload, or whether it lives directly on the
+    /// class (as a <c>@JvmStatic</c> bridge) or only on the real <c>Metadata.Companion</c>
+    /// instance - see the longer explanation on <see cref="CreateWeightRecord"/> for why this
+    /// discovers it at runtime instead of hard-coding another guess.
+    /// </summary>
+    private static Java.Lang.Object FindAndInvokeManualEntry(Java.Lang.Class metadataClass)
+    {
+        if (TryInvokeManualEntry(metadataClass, receiver: null, out var metadata))
+            return metadata;
+
+        using (var companionField = metadataClass.GetField("Companion"))
+        using (var companion = companionField.Get(null))
+        {
+            if (companion is not null)
+            {
+                using var companionClass = companion.Class;
+                if (TryInvokeManualEntry(companionClass, companion, out metadata))
+                    return metadata;
+            }
+        }
+
+        throw new InvalidOperationException(
+            "Could not find a callable Metadata.manualEntry(...) overload via reflection " +
+            "(checked public methods on both the Metadata class and its Companion instance).");
+    }
+
+    /// <summary>
+    /// Looks for a public method named <c>manualEntry</c> taking zero or one parameters on
+    /// <paramref name="declaringClass"/>, and invokes the first one found against
+    /// <paramref name="receiver"/> (<see langword="null"/> for a static method, the real
+    /// <c>Metadata.Companion</c> instance for an instance method on it), passing
+    /// <see langword="null"/> for the one-parameter case (the real Kotlin function's only
+    /// parameter, <c>device</c>, is nullable/optional).
+    /// </summary>
+    private static bool TryInvokeManualEntry(Java.Lang.Class declaringClass, Java.Lang.Object? receiver, out Java.Lang.Object metadata)
+    {
+        // GetMethods()/GetParameterTypes() return plain C# arrays of JNI-backed objects, not a
+        // disposable container of their own - each element is disposed individually below.
+        var methods = declaringClass.GetMethods()!;
+        foreach (var method in methods)
+        {
+            using (method)
+            {
+                if (method.Name != "manualEntry")
+                    continue;
+
+                var parameterTypes = method.GetParameterTypes()!;
+                try
+                {
+                    switch (parameterTypes.Length)
+                    {
+                        case 0:
+                            metadata = method.Invoke(receiver)!;
+                            return true;
+                        case 1:
+                            metadata = method.Invoke(receiver, (Java.Lang.Object?)null)!;
+                            return true;
+                    }
+                }
+                catch (Java.Lang.Exception)
+                {
+                    // This specific overload wasn't actually callable this way (e.g. a
+                    // non-nullable parameter that rejected null) - keep looking.
+                }
+            }
+        }
+
+        metadata = null!;
+        return false;
     }
 
     /// <summary>
