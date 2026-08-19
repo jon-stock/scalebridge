@@ -597,6 +597,47 @@ running on the real device - if a fourth error appears, it should at least now c
 stack trace (per the previous section's diagnostics work) pointing at exactly which
 `LoadClass`/`GetMethod`/`GetConstructor`/`NewInstance` call failed and why.
 
+## Sixth error: `NoSuchMethodException: parameter type is null`, and ending the guessing for good
+
+After the fifth fix (real `connect-client:1.1.0-alpha07` source confirmed, `CreateMetadata` built
+directly from its real constructor), the write path failed differently again:
+
+```
+Java.Lang.ReflectiveOperationException: parameter type is null
+  at Java.Lang.Class.GetConstructor(Class[])
+  at ScaleBridge.Health.HealthConnectWriter.CreateWeightRecord(...)
+java.lang.NoSuchMethodException: parameter type is null
+```
+
+`"parameter type is null"` is OpenJDK's own hard-coded message from `Class.getConstructor0` when
+one element of the `Class[]` array passed to it is a null Java reference - i.e. one of
+`instantClass`/`zoneOffsetClass`/`massClass`/`metadataClass` in `CreateWeightRecord` was `null` at
+the point of the call, despite every one of them coming from `classLoader.LoadClass(name)!` - a
+call that, per the documented `ClassLoader` contract, is supposed to be incapable of returning
+`null` (it must always either return a real class or throw `ClassNotFoundException`).
+
+The `!` null-forgiving operator on each `LoadClass(...)!` call is exactly why this was
+undiagnosable from the stack trace alone: `!` only suppresses the *compiler's* static
+nullable-reference-type warning - it does nothing at runtime, and specifically doesn't tell you
+*which* of the four otherwise-identical-looking calls actually produced the impossible `null`.
+Whether the deeper cause is a genuine Mono.Android/Java.Interop binding gap in `ClassLoader`'s
+exception-checking for this call, or something else entirely, remains unconfirmed - but rather
+than take a sixth guess at *that* too, every `LoadClass`/`GetMethod`/`GetConstructor`/`NewInstance`
+result in this file now goes through either a new `RequireClass` helper or an inline `?? throw`,
+each with a message naming the exact class/constructor/method involved. Silent, undiagnosable
+`null`s like this one should now be structurally impossible here going forward - whatever fails
+next will say exactly what failed, in "Last crash" and the exception itself, on the first attempt.
+
+Separately, since guessing the .NET binding generator's exact behaviour has been the single
+biggest source of wasted round trips across all six of these fixes, a new CI step
+("Dump generated Health Connect binding source (diagnostic)" in `build-apk.yml`) now copies out
+whatever generated C# source the binding generator wrote under `src/ScaleBridge/obj/` that
+mentions `Health.Connect`, uploaded as the `health-connect-binding-dump` build artifact on every
+run. This is real, ground-truth *generated C# binding source* - not Kotlin source requiring
+further translation-to-C#-names guesswork like every fix above relied on - and should let any
+future Health Connect binding question (parameter/member names, exact overloads, etc.) be answered
+by downloading and reading that artifact directly, without needing another device round trip.
+
 ## Fourth Health Connect error: `NoSuchMethodException: ...Metadata.manualEntry []`
 
 Right on cue - the fourth error predicted above, with a full stack trace this time:

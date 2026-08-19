@@ -47,6 +47,25 @@ public static class HealthConnectWriter
     // see CreateMetadata.
     private const int RecordingMethodManualEntry = 3;
 
+    /// <summary>
+    /// Every <c>ClassLoader.loadClass(name)</c> call in this file is wrapped in this instead of a
+    /// bare <c>!</c> null-forgiving operator: per the documented `ClassLoader` contract, it should
+    /// be genuinely impossible for `LoadClass` to return <see langword="null"/> (it must either
+    /// return a real class or throw <c>ClassNotFoundException</c>) - but a real device produced
+    /// exactly that impossible outcome once (see docs/PROTOCOL_CONFIRMATION.md: a
+    /// <c>NoSuchMethodException: parameter type is null</c> several calls later, from
+    /// <c>Class.GetConstructor</c>, with no way to tell which of four candidate classes was
+    /// actually the null one). `!` only silences the compiler's static nullable-reference-type
+    /// warning - it does nothing at runtime to prevent or explain an actual null reference. This
+    /// throws immediately, naming the exact class that failed, so the *next* occurrence (whatever
+    /// its ultimate root cause) is instantly diagnosable from "Last crash" alone instead of
+    /// requiring another guess.
+    /// </summary>
+    private static Java.Lang.Class RequireClass(Java.Lang.Class? loaded, string javaClassName) =>
+        loaded ?? throw new InvalidOperationException(
+            $"ClassLoader.loadClass(\"{javaClassName}\") returned null instead of throwing or " +
+            "returning a real class - see HealthConnectWriter.RequireClass.");
+
     public static bool IsAvailable(Context context)
     {
         // HealthConnectClient.getSdkStatus(...) returns SDK_AVAILABLE (3) once Health Connect is
@@ -104,9 +123,10 @@ public static class HealthConnectWriter
     public static AndroidX.Activity.Result.Contract.ActivityResultContract CreatePermissionRequestContract(Context context)
     {
         using var classLoader = context.ClassLoader!;
-        using var stringClass = classLoader.LoadClass(StringJavaClassName)!;
-        using var controllerClass = classLoader.LoadClass(PermissionControllerJavaClassName)!;
-        using var method = controllerClass.GetMethod("createRequestPermissionResultContract", stringClass);
+        using var stringClass = RequireClass(classLoader.LoadClass(StringJavaClassName), StringJavaClassName);
+        using var controllerClass = RequireClass(classLoader.LoadClass(PermissionControllerJavaClassName), PermissionControllerJavaClassName);
+        using var method = controllerClass.GetMethod("createRequestPermissionResultContract", stringClass)
+            ?? throw new InvalidOperationException($"{PermissionControllerJavaClassName}.createRequestPermissionResultContract(String) was not found via reflection.");
         using var providerPackageName = new Java.Lang.String(DefaultProviderPackageName);
         var result = method.Invoke(null, providerPackageName);
         return (AndroidX.Activity.Result.Contract.ActivityResultContract)result!;
@@ -203,15 +223,17 @@ public static class HealthConnectWriter
     private static WeightRecord CreateWeightRecord(Context context, Java.Time.Instant instant, Mass weight)
     {
         using var classLoader = context.ClassLoader!;
-        using var weightRecordClass = classLoader.LoadClass(WeightRecordJavaClassName)!;
-        using var instantClass = classLoader.LoadClass(InstantJavaClassName)!;
-        using var zoneOffsetClass = classLoader.LoadClass(ZoneOffsetJavaClassName)!;
-        using var massClass = classLoader.LoadClass(MassJavaClassName)!;
-        using var metadataClass = classLoader.LoadClass(MetadataJavaClassName)!;
+        using var weightRecordClass = RequireClass(classLoader.LoadClass(WeightRecordJavaClassName), WeightRecordJavaClassName);
+        using var instantClass = RequireClass(classLoader.LoadClass(InstantJavaClassName), InstantJavaClassName);
+        using var zoneOffsetClass = RequireClass(classLoader.LoadClass(ZoneOffsetJavaClassName), ZoneOffsetJavaClassName);
+        using var massClass = RequireClass(classLoader.LoadClass(MassJavaClassName), MassJavaClassName);
+        using var metadataClass = RequireClass(classLoader.LoadClass(MetadataJavaClassName), MetadataJavaClassName);
 
         using var metadata = CreateMetadata(classLoader, metadataClass);
 
-        using var constructor = weightRecordClass.GetConstructor(instantClass, zoneOffsetClass, massClass, metadataClass);
+        using var constructor = weightRecordClass.GetConstructor(instantClass, zoneOffsetClass, massClass, metadataClass)
+            ?? throw new InvalidOperationException(
+                $"{WeightRecordJavaClassName}(Instant, ZoneOffset, Mass, Metadata) constructor was not found via reflection.");
         var result = constructor.NewInstance(instant, null, weight, metadata);
         return (WeightRecord)result!;
     }
@@ -232,29 +254,33 @@ public static class HealthConnectWriter
     /// </summary>
     private static Java.Lang.Object CreateMetadata(Java.Lang.ClassLoader classLoader, Java.Lang.Class metadataClass)
     {
-        using var stringClass = classLoader.LoadClass(StringJavaClassName)!;
-        using var dataOriginClass = classLoader.LoadClass(DataOriginJavaClassName)!;
-        using var instantClass = classLoader.LoadClass(InstantJavaClassName)!;
-        using var deviceClass = classLoader.LoadClass(DeviceJavaClassName)!;
-        using var longType = Java.Lang.Long.Type!;
-        using var intType = Java.Lang.Integer.Type!;
+        using var stringClass = RequireClass(classLoader.LoadClass(StringJavaClassName), StringJavaClassName);
+        using var dataOriginClass = RequireClass(classLoader.LoadClass(DataOriginJavaClassName), DataOriginJavaClassName);
+        using var instantClass = RequireClass(classLoader.LoadClass(InstantJavaClassName), InstantJavaClassName);
+        using var deviceClass = RequireClass(classLoader.LoadClass(DeviceJavaClassName), DeviceJavaClassName);
+        using var longType = Java.Lang.Long.Type ?? throw new InvalidOperationException("Java.Lang.Long.Type (primitive long Class) was null.");
+        using var intType = Java.Lang.Integer.Type ?? throw new InvalidOperationException("Java.Lang.Integer.Type (primitive int Class) was null.");
 
         // DataOrigin(packageName: String) - a plain, single-argument public constructor with no
         // default of its own, matching Metadata's own default of DataOrigin("").
-        using var dataOriginConstructor = dataOriginClass.GetConstructor(stringClass);
+        using var dataOriginConstructor = dataOriginClass.GetConstructor(stringClass)
+            ?? throw new InvalidOperationException($"{DataOriginJavaClassName}(String) constructor was not found via reflection.");
         using var emptyPackageName = new Java.Lang.String(string.Empty);
-        using var dataOrigin = dataOriginConstructor.NewInstance(emptyPackageName);
+        using var dataOrigin = dataOriginConstructor.NewInstance(emptyPackageName)
+            ?? throw new InvalidOperationException($"{DataOriginJavaClassName}(String) constructor returned null.");
 
-        using var epoch = Java.Time.Instant.Epoch!;
+        using var epoch = Java.Time.Instant.Epoch ?? throw new InvalidOperationException("Java.Time.Instant.Epoch was null.");
 
         using var metadataConstructor = metadataClass.GetConstructor(
-            stringClass, dataOriginClass, instantClass, stringClass, longType, deviceClass, intType);
+            stringClass, dataOriginClass, instantClass, stringClass, longType, deviceClass, intType)
+            ?? throw new InvalidOperationException(
+                $"{MetadataJavaClassName}(String, DataOrigin, Instant, String, long, Device, int) constructor was not found via reflection.");
         using var emptyId = new Java.Lang.String(string.Empty);
         using var clientRecordVersion = new Java.Lang.Long(0L);
         using var recordingMethod = new Java.Lang.Integer(RecordingMethodManualEntry);
         var result = metadataConstructor.NewInstance(
             emptyId, dataOrigin, epoch, null, clientRecordVersion, null, recordingMethod);
-        return result!;
+        return result ?? throw new InvalidOperationException($"{MetadataJavaClassName} constructor returned null.");
     }
 
     /// <summary>

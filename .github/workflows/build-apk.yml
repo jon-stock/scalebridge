@@ -61,3 +61,40 @@ jobs:
           name: ScaleBridge-apk
           path: src/ScaleBridge/bin/Release/**/*-Signed.apk
           if-no-files-found: error
+
+      - name: Dump generated Health Connect binding source (diagnostic)
+        # Every Health Connect crash so far (see docs/PROTOCOL_CONFIRMATION.md) came from guessing
+        # what the .NET binding generator actually calls a given Kotlin type/method, since that
+        # can only otherwise be confirmed by running on a real device. The binding generator
+        # writes its generated C# source for AndroidMavenLibrary references (like connect-client)
+        # to disk under obj/ as a normal build side effect - this copies out whatever it generated
+        # that mentions Health Connect, so it can be inspected directly instead of guessed at.
+        # Always runs (even if the build/publish step above failed), since obj/ may still be
+        # partially populated and useful.
+        if: always()
+        shell: pwsh
+        run: |
+          $dest = "health-connect-binding-dump"
+          New-Item -ItemType Directory -Path $dest -Force | Out-Null
+
+          $files = Get-ChildItem -Path src/ScaleBridge/obj -Recurse -Include *.cs -ErrorAction SilentlyContinue |
+            Select-String -Pattern "Health\.Connect" -List -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty Path -Unique
+
+          if ($files) {
+            $i = 0
+            foreach ($f in $files) {
+              $i++
+              Copy-Item -LiteralPath $f -Destination (Join-Path $dest "$i`_$(Split-Path $f -Leaf)") -Force
+            }
+            "Copied $($files.Count) generated source file(s) mentioning 'Health.Connect'." | Out-File (Join-Path $dest "_SUMMARY.txt")
+          } else {
+            "No generated .cs files under src/ScaleBridge/obj mentioned 'Health.Connect'. Either binding source isn't written under obj/ for AndroidMavenLibrary references on this SDK version, or it uses a different naming pattern - the obj tree structure itself may still be worth browsing manually from a downloaded full obj dump." | Out-File (Join-Path $dest "_SUMMARY.txt")
+          }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: health-connect-binding-dump
+          path: health-connect-binding-dump/**
+          if-no-files-found: warn

@@ -42,6 +42,7 @@ public class MainActivity : ComponentActivity
 {
     private const int RequestCodeAndroidPermissions = 1001;
     private const long DebugScanDurationMs = 15_000;
+    private const long AutoRefreshIntervalMs = 3_000;
 
     private TextView _tvStatus = null!;
     private TextView _tvScanEmpty = null!;
@@ -63,6 +64,13 @@ public class MainActivity : ComponentActivity
 
     private ActivityResultLauncher? _healthPermissionLauncher;
     private string? _lastHealthConnectPermissionResult;
+
+    // Polls RefreshStatus() while the screen is visible, so "Pending syncs"/"Last sync"/"Last
+    // error" reflect background activity (a scale-triggered sync running via ScaleScanReceiver +
+    // ScaleConnectionService) without the user needing to close and reopen the app to see it -
+    // there was previously no way to observe that short of doing exactly that. Started in
+    // OnResume and stopped in OnPause, matching the existing manual RefreshStatus() call sites.
+    private readonly Handler _autoRefreshHandler = new(Looper.MainLooper!);
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -140,6 +148,24 @@ public class MainActivity : ComponentActivity
     {
         base.OnResume();
         RefreshStatus();
+        ScheduleAutoRefresh();
+    }
+
+    protected override void OnPause()
+    {
+        base.OnPause();
+        // Stop polling once the screen isn't visible - there's nothing useful to refresh in the
+        // UI while it isn't shown, and this avoids running indefinitely in the background.
+        _autoRefreshHandler.RemoveCallbacksAndMessages(null);
+    }
+
+    private void ScheduleAutoRefresh()
+    {
+        _autoRefreshHandler.PostDelayed(() =>
+        {
+            RefreshStatus();
+            ScheduleAutoRefresh();
+        }, AutoRefreshIntervalMs);
     }
 
     private void RefreshStatus()
