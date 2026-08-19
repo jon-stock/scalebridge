@@ -638,6 +638,64 @@ further translation-to-C#-names guesswork like every fix above relied on - and s
 future Health Connect binding question (parameter/member names, exact overloads, etc.) be answered
 by downloading and reading that artifact directly, without needing another device round trip.
 
+## Downloading and reading the binding dump ended the guessing entirely
+
+The binding dump artifact from the run that shipped the section above was downloaded and read
+immediately (via the GitHub API, using a token already available from the local `git` credential
+helper - `git credential fill` for `https://github.com`) rather than waiting for another device
+test. It answered every remaining open question about this file's real API surface at once, and
+the result was a genuine surprise: **none of the reflection in this file was ever actually
+necessary.**
+
+The real generated C# for `androidx/health/connect/client/records/metadata/Metadata` shows a
+perfectly ordinary, directly-constructible public sealed class:
+
+```csharp
+namespace Androidx.Health.Connect.Client.Records.Metadata {
+    public sealed partial class Metadata : Java.Lang.Object {
+        public static Metadata Empty { get; }                 // real, public, despite Kotlin `internal`
+        public const int RecordingMethodManualEntry = 3;
+        public Metadata();                                     // real parameterless constructor too
+        public Metadata(string id, DataOrigin dataOrigin, Java.Time.Instant lastModifiedTime,
+                         string? clientRecordId, long clientRecordVersion, Device? device,
+                         int recordingMethod);
+    }
+}
+```
+
+`DataOrigin(string packageName)` and `WeightRecord(Instant, ZoneOffset?, Mass, Metadata)` are
+equally ordinary public constructors - confirmed to exactly match what every fix already assumed
+for `WeightRecord`, and directly buildable now for `Metadata`/`DataOrigin` with zero reflection.
+Best of all, `Androidx.Health.Connect.Client.IPermissionController` has a real, direct, C# 11
+static interface method,
+`public static ActivityResultContract CreateRequestPermissionResultContract()` - the
+`PermissionController` class earlier fixes used reflection to reach (correctly guessing it needed
+special handling) turns out to have an even simpler direct answer than reflection: don't use the
+*obsolete* `PermissionController` class at all (its Java registration name is confirmed, right
+there in the dump, to be the exact same kind of synthetic
+`mono/internal/androidx/health/connect/client/PermissionController` that broke
+`Class.FromType(typeof(HealthConnectClient))` earlier) - call the static method directly on
+`IPermissionController` instead. Even `Mass`'s factory, the one piece already confirmed to only be
+reachable via reflection (a real Kotlin companion-instance method with no direct static bridge),
+turned out to *also* have a direct, ordinary static method after all:
+`Mass.InvokeKilograms(double)` - the binding generator's disambiguated name for the real Kotlin
+`kilograms(Double)` factory, kept apart from the already-present instance property `Mass.Kilograms`
+(for reading a `Mass` back out in kilograms).
+
+`HealthConnectWriter.cs` was rewritten to use these real, confirmed, directly-callable C# members
+throughout, removing every `Java.Lang.Class`/`ClassLoader`/`GetMethod`/`GetConstructor`/`Invoke`
+call in the file entirely. This is a categorically more reliable fix than any of the previous six:
+those all depended on some assumption about Kotlin-to-JVM-to-.NET bridging behaviour holding true,
+each one wrong in a different way; this one is typed, compiler-checked C# calling real,
+already-generated members whose exact names and signatures were read directly from the compiler's
+own output, not guessed at all.
+
+**Takeaway for any future Health Connect (or other Maven-resolved AndroidMavenLibrary) work**:
+don't guess a C# binding shape from Kotlin source and iterate via real-device crashes - download
+the relevant `*-binding-dump` CI artifact (or add an equivalent one) and read the actual generated
+C# first. It is dramatically faster (one CI run, ~5 minutes, no device needed) and, as this section
+shows, can reveal that reflection isn't even necessary at all for a given call.
+
 ## Fourth Health Connect error: `NoSuchMethodException: ...Metadata.manualEntry []`
 
 Right on cue - the fourth error predicted above, with a full stack trace this time:

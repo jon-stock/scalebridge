@@ -85,7 +85,7 @@ public class MainActivity : ComponentActivity
         try
         {
             _healthPermissionLauncher = RegisterForActivityResult(
-                HealthConnectWriter.CreatePermissionRequestContract(this),
+                HealthConnectWriter.CreatePermissionRequestContract(),
                 new HealthPermissionResultCallback(this));
         }
         catch (Exception ex)
