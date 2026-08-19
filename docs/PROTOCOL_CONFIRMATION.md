@@ -534,3 +534,65 @@ full detail. This is a pure diagnostics improvement, independent of whether the 
 above turns out to be complete - if a third Health Connect error appears, "Last crash" should now
 contain enough information (real exception type, real message, real stack trace) to diagnose it
 without another round trip like this one.
+
+## Third Health Connect crash: `ClassNotFoundException: mono.internal...HealthConnectClient`, and why "not available on this build" appeared
+
+The classloader fix above was installed and tested. It crashed differently, and this time the full
+stack trace (thanks to the diagnostics improvement in the previous section, though this one
+actually crashed early enough to be a normal unhandled exception with a full logcat-style trace)
+pointed straight at the cause:
+
+```
+Java.Lang.ClassNotFoundException: mono.internal.androidx.health.connect.client.HealthConnectClient
+  at Java.Lang.Class.FromType(Type)
+  at ScaleBridge.Health.HealthConnectWriter.CreatePermissionRequestContract()
+  at ScaleBridge.MainActivity.OnCreate(Bundle savedInstanceState)
+```
+
+This also explains a second symptom reported at the same time: tapping "Grant Health Connect
+write access" said Health Connect "wasn't available on this build". `CreatePermissionRequestContract()`
+is called from `MainActivity.OnCreate` inside a deliberate try/catch (added earlier in this
+document, in "Crash on first launch, and defensive hardening") that sets
+`_healthPermissionLauncher = null` on failure - so this `ClassNotFoundException` was silently
+caught there, and the resulting null launcher is exactly what makes `RequestHealthConnectPermission`
+show "Health Connect permission request isn't available on this build". Not a real
+availability/installation problem - a swallowed startup exception from the fix in the previous
+section.
+
+Root cause: the previous fix used `Java.Lang.Class.FromType(typeof(HealthConnectClient))` to get a
+`ClassLoader` known to have access to this library, on the theory that `HealthConnectClient` "is
+already a real, compile-time-bound, working C# type, so `FromType` on it must be safe" - it had
+been used successfully (as ordinary typed static calls, `HealthConnectClient.GetOrCreate(context)`/
+`GetSdkStatus(context)`) since the very start of this file. That theory was wrong specifically for
+`FromType`: `HealthConnectClient` is a Kotlin *interface* with a companion object (unlike `Mass` or
+`WeightRecord`, both genuine concrete Kotlin classes), and its C# binding for the companion's
+static factory methods is apparently a synthetic, static-only helper type with no real,
+separately-loadable Java class backing it at all - ordinary typed static method calls to it work
+fine (they're wired directly to the real companion object's methods internally), but
+`Class.FromType(Type)` - which calls `JNIEnv.FindClass(Type)` to compute and look up an actual
+loadable Java class name for that C# type - has nothing real to find, and apparently computes some
+internal-only placeholder name (`mono.internal....`) instead of ever finding the true class.
+`PermissionController` (used in the exact same call, one level down) is the same kind of Kotlin
+interface-with-companion, so it likely has the same problem and simply hadn't been tried via
+`FromType` directly.
+
+Fixed by removing `Class.FromType`/`Class.ForName` from this whole area entirely, in favour of one
+single, unambiguous mechanism: `Context.getClassLoader()`. This is a plain, standard Android API
+(not a Xamarin/Mono binding-generator construct at all) that returns the one real `ClassLoader`
+actually used to load every class in the running app's APK, including Maven-resolved dependencies
+like `connect-client` - there's no separate/isolated classloader per library in a normal .NET for
+Android app. Both `CreatePermissionRequestContract` (now takes a `Context` parameter, threaded
+through from `MainActivity.OnCreate`'s `this`) and `CreateWeightRecord` (already had a `Context`
+available, from `WriteWeightAsync`) now load every class they need
+(`PermissionController`/`WeightRecord`/`Instant`/`ZoneOffset`/`Mass`/`Metadata`) via
+`context.ClassLoader!.LoadClass(name)`, rather than mixing `FromType` in for the ones that "should"
+already work. The one exception is `Mass` inside `CreateMassInKilograms`, deliberately left
+exactly as it was (`Class.FromType(typeof(Mass))`) since - unlike everything else touched across
+these three fix attempts - it's the one part of this whole area actually confirmed to work
+end-to-end on a real device, and changing working code here without a real bug to justify it would
+just be introducing risk for no reason.
+
+This is now the third fix attempt for this write path, each one only discoverable by actually
+running on the real device - if a fourth error appears, it should at least now come with a full
+stack trace (per the previous section's diagnostics work) pointing at exactly which
+`LoadClass`/`GetMethod`/`GetConstructor`/`NewInstance` call failed and why.
