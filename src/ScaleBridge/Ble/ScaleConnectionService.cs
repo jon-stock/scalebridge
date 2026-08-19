@@ -98,6 +98,7 @@ public class ScaleConnectionService : Service
             {
                 await HealthConnectWriter.WriteWeightAsync(this, weightKg, whenUtc);
                 StatusStore.RecordSuccess(this, weightKg, whenUtc);
+                WeightHistoryStore.RecordSynced(this, weightKg, whenUtc);
                 SyncNotifier.PostSuccess(this, weightKg, whenUtc.ToLocalTime());
                 Log.Info(LogTag, $"Wrote {weightKg:0.0} kg to Health Connect.");
             }
@@ -116,9 +117,10 @@ public class ScaleConnectionService : Service
                 CrashLog.Record(this, ex);
 
                 // Don't just lose this reading because one sync attempt failed - persist it so
-                // MainActivity can show it and let the user retry the write later without
-                // needing to step back on the scale to capture the same weight again.
-                PendingSyncStore.Add(this, weightKg, whenUtc);
+                // MainActivity can show it (in the History list, marked pending) and let the user
+                // retry the write later without needing to step back on the scale to capture the
+                // same weight again.
+                WeightHistoryStore.RecordPending(this, weightKg, whenUtc);
 
                 string shortDetail = $"{ex.GetType().Name}: {ex.Message}";
                 StatusStore.RecordError(this, $"{shortDetail} (see \"Last crash\" for full details)", DateTimeOffset.UtcNow);

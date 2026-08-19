@@ -65,6 +65,19 @@ public class ScaleScanReceiver : BroadcastReceiver
             return;
         }
 
+        // See ScanCooldownStore and the CallbackType.FirstMatch comment on ScaleScanRegistrar:
+        // a scale that keeps advertising while idle can otherwise re-trigger this whole receiver
+        // (and a real GATT connection attempt, foreground service, and notification) repeatedly.
+        // Ignored silently - no notification, no log spam beyond one Info line - since this is the
+        // expected, harmless case of "the scale is just still there", not an error.
+        if (ScanCooldownStore.IsInCooldown(context))
+        {
+            Log.Info(LogTag, $"Ignoring scan match for {device.Address} - within the cooldown period since the last attempt.");
+            return;
+        }
+
+        ScanCooldownStore.RecordAttempt(context, DateTimeOffset.UtcNow);
+
         Log.Info(LogTag, $"Scale advertisement matched: {device.Address}. Starting connection service.");
 
         var serviceIntent = new Intent(context, typeof(ScaleConnectionService))

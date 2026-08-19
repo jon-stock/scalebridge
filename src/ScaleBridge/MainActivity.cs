@@ -46,16 +46,31 @@ public class MainActivity : ComponentActivity
 
     private TextView _tvStatus = null!;
     private TextView _tvScanEmpty = null!;
-    private TextView _tvLastSync = null!;
     private TextView _tvHealthConnectPermissionStatus = null!;
     private ListView _lvDevices = null!;
     private EditText _etMac = null!;
     private EditText _etName = null!;
-    private View _cardLastCrash = null!;
-    private TextView _tvLastCrash = null!;
-    private View _cardPendingSync = null!;
-    private TextView _tvPendingSync = null!;
+
+    // Setup (status + steps 1-3) is visible by default until the scale is configured, then
+    // hidden - now that the app is past its initial MVP stage, there's no need to keep showing
+    // one-off setup steps every time it's opened. Toggled back on via the overflow menu (e.g. to
+    // reconfigure a different scale later); "Last crash"/"Last error" moved the same way, into a
+    // menu-triggered dialog (see ShowDiagnosticsDialog) instead of an always-visible card.
+    private View _setupSection = null!;
+    private bool _setupSectionVisible;
+
+    private TextView _tvHistoryRange = null!;
+    private TextView _tvHistoryEmpty = null!;
+    private ListView _lvHistory = null!;
+    private Button _btnHistoryOlder = null!;
+    private Button _btnHistoryNewer = null!;
     private Button _btnRetryPending = null!;
+    private ArrayAdapter<string>? _historyListAdapter;
+
+    // 0 = the most recent 7 days (today back to 6 days ago); 1 = the 7 days before that; etc. -
+    // Prompt.md's history list is "paginated after a week", i.e. one rolling 7-day page at a time
+    // rather than a single unbounded scroll of the app's entire history.
+    private int _historyWeekOffset;
 
     private ScanCallback? _debugScanCallback;
     private readonly Dictionary<string, string> _seenDevices = new();
@@ -65,11 +80,12 @@ public class MainActivity : ComponentActivity
     private ActivityResultLauncher? _healthPermissionLauncher;
     private string? _lastHealthConnectPermissionResult;
 
-    // Polls RefreshStatus() while the screen is visible, so "Pending syncs"/"Last sync"/"Last
-    // error" reflect background activity (a scale-triggered sync running via ScaleScanReceiver +
-    // ScaleConnectionService) without the user needing to close and reopen the app to see it -
-    // there was previously no way to observe that short of doing exactly that. Started in
-    // OnResume and stopped in OnPause, matching the existing manual RefreshStatus() call sites.
+    // Polls RefreshStatus() while the screen is visible, so the History list (including any
+    // newly-pending entry) reflects background activity (a scale-triggered sync running via
+    // ScaleScanReceiver + ScaleConnectionService) without the user needing to close and reopen
+    // the app to see it - there was previously no way to observe that short of doing exactly
+    // that. Started in OnResume and stopped in OnPause, matching the existing manual
+    // RefreshStatus() call sites.
     private readonly Handler _autoRefreshHandler = new(Looper.MainLooper!);
 
     protected override void OnCreate(Bundle? savedInstanceState)
@@ -81,7 +97,7 @@ public class MainActivity : ComponentActivity
         // never-run-on-a-device binding surface (see HealthConnectWriter.CreatePermissionRequestContract),
         // and a crash here previously took the whole app down on every launch before this screen
         // even rendered. If it fails, the button below degrades gracefully instead, and the
-        // failure is captured in the "Last crash" card via CrashLog.
+        // failure is captured for the Diagnostics menu via CrashLog.
         try
         {
             _healthPermissionLauncher = RegisterForActivityResult(
@@ -98,23 +114,33 @@ public class MainActivity : ComponentActivity
 
         _tvStatus = FindViewById<TextView>(Resource.Id.tvStatus)!;
         _tvScanEmpty = FindViewById<TextView>(Resource.Id.tvScanEmpty)!;
-        _tvLastSync = FindViewById<TextView>(Resource.Id.tvLastSync)!;
         _tvHealthConnectPermissionStatus = FindViewById<TextView>(Resource.Id.tvHealthConnectPermissionStatus)!;
         _lvDevices = FindViewById<ListView>(Resource.Id.lvDevices)!;
         _etMac = FindViewById<EditText>(Resource.Id.etMac)!;
         _etName = FindViewById<EditText>(Resource.Id.etName)!;
-        _cardLastCrash = FindViewById<View>(Resource.Id.cardLastCrash)!;
-        _tvLastCrash = FindViewById<TextView>(Resource.Id.tvLastCrash)!;
-        FindViewById<Button>(Resource.Id.btnClearCrash)!.Click += (_, _) =>
-        {
-            CrashLog.Clear(this);
-            RefreshStatus();
-        };
 
-        _cardPendingSync = FindViewById<View>(Resource.Id.cardPendingSync)!;
-        _tvPendingSync = FindViewById<TextView>(Resource.Id.tvPendingSync)!;
+        _setupSection = FindViewById<View>(Resource.Id.setupSection)!;
+        _setupSectionVisible = !ScaleConfig.IsConfigured(this);
+
+        _tvHistoryRange = FindViewById<TextView>(Resource.Id.tvHistoryRange)!;
+        _tvHistoryEmpty = FindViewById<TextView>(Resource.Id.tvHistoryEmpty)!;
+        _lvHistory = FindViewById<ListView>(Resource.Id.lvHistory)!;
+        _btnHistoryOlder = FindViewById<Button>(Resource.Id.btnHistoryOlder)!;
+        _btnHistoryNewer = FindViewById<Button>(Resource.Id.btnHistoryNewer)!;
         _btnRetryPending = FindViewById<Button>(Resource.Id.btnRetryPending)!;
+        _btnHistoryOlder.Click += (_, _) => { _historyWeekOffset++; RefreshHistory(); };
+        _btnHistoryNewer.Click += (_, _) =>
+        {
+            if (_historyWeekOffset > 0)
+            {
+                _historyWeekOffset--;
+                RefreshHistory();
+            }
+        };
         _btnRetryPending.Click += (_, _) => RetryPendingSyncsAsync();
+
+        _historyListAdapter = new ArrayAdapter<string>(this, Resource.Layout.list_item_history, Resource.Id.tvHistoryRow, new List<string>());
+        _lvHistory.Adapter = _historyListAdapter;
 
         _deviceListAdapter = new ArrayAdapter<string>(this, Resource.Layout.list_item_device, Resource.Id.tvDeviceRow, new List<string>());
         _lvDevices.Adapter = _deviceListAdapter;
@@ -124,10 +150,16 @@ public class MainActivity : ComponentActivity
         // ScrollView intercepts touch/drag gestures before the list ever sees them, so the list
         // itself can't be scrolled once it has more items than fit in its fixed height. Telling
         // the parent not to intercept touches that start on the list (while still letting the
-        // list handle them normally - e.Handled is left false) is the standard fix.
+        // list handle them normally - e.Handled is left false) is the standard fix. Applies to
+        // both nested lists.
         _lvDevices.Touch += (_, e) =>
         {
             _lvDevices.Parent?.RequestDisallowInterceptTouchEvent(true);
+            e.Handled = false;
+        };
+        _lvHistory.Touch += (_, e) =>
+        {
+            _lvHistory.Parent?.RequestDisallowInterceptTouchEvent(true);
             e.Handled = false;
         };
 
@@ -142,6 +174,64 @@ public class MainActivity : ComponentActivity
             _etMac.Text = existingAddress;
         if (!string.IsNullOrEmpty(existingName))
             _etName.Text = existingName;
+    }
+
+    public override bool OnCreateOptionsMenu(IMenu? menu)
+    {
+        MenuInflater!.Inflate(Resource.Menu.main_menu, menu);
+        return true;
+    }
+
+    public override bool OnOptionsItemSelected(IMenuItem item)
+    {
+        if (item.ItemId == Resource.Id.menuToggleSetup)
+        {
+            _setupSectionVisible = !_setupSectionVisible;
+            RefreshStatus();
+            return true;
+        }
+
+        if (item.ItemId == Resource.Id.menuDiagnostics)
+        {
+            ShowDiagnosticsDialog();
+            return true;
+        }
+
+        return base.OnOptionsItemSelected(item);
+    }
+
+    /// <summary>
+    /// "Last crash"/"Last error" used to be always-visible cards on the main screen - moved here,
+    /// behind the overflow menu, now that the app is past its initial MVP stage and these are
+    /// only relevant when something has actually gone wrong.
+    /// </summary>
+    private void ShowDiagnosticsDialog()
+    {
+        var lastCrashUtc = CrashLog.LastCrashUtc(this);
+        var lastCrashText = CrashLog.LastCrashText(this);
+        var lastError = StatusStore.LastError(this);
+
+        string message = lastCrashText is not null
+            ? $"Last crash ({lastCrashUtc?.ToLocalTime():g}):\n\n{lastCrashText}"
+            : lastError is not null
+                ? $"Last error ({StatusStore.LastErrorUtc(this)?.ToLocalTime():g}):\n\n{lastError}"
+                : "No crashes or errors recorded.";
+
+        var builder = new AlertDialog.Builder(this)!
+            .SetTitle("Diagnostics")!
+            .SetMessage(message)!
+            .SetPositiveButton("OK", (EventHandler<DialogClickEventArgs>?)null)!;
+
+        if (lastCrashText is not null)
+        {
+            builder.SetNegativeButton("Clear", (_, _) =>
+            {
+                CrashLog.Clear(this);
+                RefreshStatus();
+            });
+        }
+
+        builder.Show();
     }
 
     protected override void OnResume()
@@ -170,16 +260,7 @@ public class MainActivity : ComponentActivity
 
     private void RefreshStatus()
     {
-        var lastCrash = CrashLog.LastCrashText(this);
-        if (lastCrash is not null)
-        {
-            _cardLastCrash.Visibility = ViewStates.Visible;
-            _tvLastCrash.Text = $"{CrashLog.LastCrashUtc(this)?.ToLocalTime():g}\n\n{lastCrash}";
-        }
-        else
-        {
-            _cardLastCrash.Visibility = ViewStates.Gone;
-        }
+        _setupSection.Visibility = _setupSectionVisible ? ViewStates.Visible : ViewStates.Gone;
 
         bool configured = ScaleConfig.IsConfigured(this);
         bool hasPermissions = PermissionHelper.HasAllRequiredAndroidPermissions(this);
@@ -192,49 +273,75 @@ public class MainActivity : ComponentActivity
 
         _tvHealthConnectPermissionStatus.Text = _lastHealthConnectPermissionResult ?? "Not requested yet in this session.";
 
-        var pending = PendingSyncStore.GetAll(this);
-        if (pending.Count > 0)
-        {
-            _cardPendingSync.Visibility = ViewStates.Visible;
-            _tvPendingSync.Text = string.Join("\n", pending.Select(p =>
-                $"{p.WeightKg:0.0} kg - {p.WhenUtc.ToLocalTime():dd MMM yyyy HH:mm}"));
-        }
-        else
-        {
-            _cardPendingSync.Visibility = ViewStates.Gone;
-        }
-
-        var lastSync = StatusStore.LastSyncUtc(this);
-        var lastWeight = StatusStore.LastWeightKg(this);
-        var lastError = StatusStore.LastError(this);
-
-        if (lastError is not null)
-        {
-            _tvLastSync.Text = $"Last error ({StatusStore.LastErrorUtc(this)?.ToLocalTime():g}): {lastError}";
-        }
-        else if (lastSync is not null && lastWeight is not null)
-        {
-            var local = lastSync.Value.ToLocalTime();
-            _tvLastSync.Text = $"{lastWeight:0.0} kg\n{local:dd MMM yyyy} at {local:HH:mm}";
-        }
-        else
-        {
-            _tvLastSync.Text = "No sync yet.";
-        }
+        RefreshHistory();
     }
 
     /// <summary>
-    /// Retries every reading in <see cref="PendingSyncStore"/> (captured from the scale but not
-    /// yet successfully written to Health Connect - see <see cref="Ble.ScaleConnectionService"/>)
-    /// directly from the UI, on the caller's (main) thread inside an <see langword="async"/>
-    /// method - unlike <see cref="Ble.ScaleConnectionService"/>, which deliberately runs the same
-    /// call via <see cref="Task.Run"/> because it has no UI thread of its own to safely block.
-    /// A reading is only removed from the pending store once it has actually, successfully been
-    /// written - anything that fails again is left in place for the next retry.
+    /// Renders the current one-week page of <see cref="WeightHistoryStore"/>, newest-first within
+    /// the page. Week 0 is the most recent 7 days (today back to 6 days ago, in local time -
+    /// simple rolling windows rather than calendar weeks, to sidestep any Monday-vs-Sunday
+    /// start-of-week question); week N is the 7 days before week N-1. "Retry pending now" reflects
+    /// pending readings across *all* history, not just the visible page, since a failed reading
+    /// from a week ago is just as retryable as one from today.
+    /// </summary>
+    private void RefreshHistory()
+    {
+        var all = WeightHistoryStore.GetAll(this); // newest first
+
+        var nowLocal = DateTimeOffset.Now;
+        var todayLocalMidnight = new DateTimeOffset(nowLocal.Date, nowLocal.Offset);
+        var pageEndExclusiveLocal = todayLocalMidnight.AddDays(1 - 7 * _historyWeekOffset);
+        var pageStartLocal = pageEndExclusiveLocal.AddDays(-7);
+        var pageStartUtc = pageStartLocal.ToUniversalTime();
+        var pageEndExclusiveUtc = pageEndExclusiveLocal.ToUniversalTime();
+
+        var pageEntries = all.Where(e => e.WhenUtc >= pageStartUtc && e.WhenUtc < pageEndExclusiveUtc).ToList();
+
+        _historyListAdapter?.Clear();
+        if (pageEntries.Count == 0)
+        {
+            _tvHistoryEmpty.Visibility = ViewStates.Visible;
+            _lvHistory.Visibility = ViewStates.Gone;
+        }
+        else
+        {
+            _tvHistoryEmpty.Visibility = ViewStates.Gone;
+            _lvHistory.Visibility = ViewStates.Visible;
+            foreach (var entry in pageEntries)
+            {
+                var local = entry.WhenUtc.ToLocalTime();
+                string line = $"{local:dd MMM yyyy HH:mm}   {entry.WeightKg:0.0} kg";
+                if (!entry.Synced)
+                    line += "   (pending retry)";
+                _historyListAdapter?.Add(line);
+            }
+        }
+
+        var rangeStartLocal = pageStartLocal;
+        var rangeEndLocal = pageEndExclusiveLocal.AddDays(-1);
+        _tvHistoryRange.Text = _historyWeekOffset == 0
+            ? $"This week ({rangeStartLocal:dd MMM} - {rangeEndLocal:dd MMM})"
+            : $"{rangeStartLocal:dd MMM yyyy} - {rangeEndLocal:dd MMM yyyy}";
+
+        _btnHistoryNewer.Enabled = _historyWeekOffset > 0;
+
+        var pending = WeightHistoryStore.GetPending(this);
+        _btnRetryPending.Visibility = pending.Count > 0 ? ViewStates.Visible : ViewStates.Gone;
+    }
+
+    /// <summary>
+    /// Retries every reading in <see cref="WeightHistoryStore.GetPending"/> (captured from the
+    /// scale but not yet successfully written to Health Connect - see
+    /// <see cref="Ble.ScaleConnectionService"/>) directly from the UI, on the caller's (main)
+    /// thread inside an <see langword="async"/> method - unlike
+    /// <see cref="Ble.ScaleConnectionService"/>, which deliberately runs the same call via
+    /// <see cref="Task.Run"/> because it has no UI thread of its own to safely block. A reading is
+    /// only marked synced once it has actually, successfully been written - anything that fails
+    /// again is left pending for the next retry.
     /// </summary>
     private async void RetryPendingSyncsAsync()
     {
-        var pending = PendingSyncStore.GetAll(this);
+        var pending = WeightHistoryStore.GetPending(this);
         if (pending.Count == 0)
             return;
 
@@ -248,7 +355,7 @@ public class MainActivity : ComponentActivity
                 try
                 {
                     await HealthConnectWriter.WriteWeightAsync(this, entry.WeightKg, entry.WhenUtc);
-                    PendingSyncStore.Remove(this, entry.WhenUtc);
+                    WeightHistoryStore.MarkSynced(this, entry.WhenUtc);
                     StatusStore.RecordSuccess(this, entry.WeightKg, entry.WhenUtc);
                     succeeded++;
                 }
@@ -267,7 +374,7 @@ public class MainActivity : ComponentActivity
         Toast.MakeText(this,
             stillFailing == 0
                 ? $"Synced {succeeded} pending reading(s)."
-                : $"Synced {succeeded} pending reading(s); {stillFailing} still failing - see \"Last crash\" for details.",
+                : $"Synced {succeeded} pending reading(s); {stillFailing} still failing - see Diagnostics (menu) for details.",
             ToastLength.Long)!.Show();
         RefreshStatus();
     }
@@ -303,7 +410,7 @@ public class MainActivity : ComponentActivity
 
         if (_healthPermissionLauncher is null)
         {
-            Toast.MakeText(this, "Health Connect permission request isn't available on this build - see \"Last crash\" below for details.", ToastLength.Long)!.Show();
+            Toast.MakeText(this, "Health Connect permission request isn't available on this build - see Diagnostics (menu) for details.", ToastLength.Long)!.Show();
             return;
         }
 
@@ -447,6 +554,13 @@ public class MainActivity : ComponentActivity
 
         var result = ScaleScanRegistrar.Register(this);
         Toast.MakeText(this, $"Scan registration: {result}", ToastLength.Long)!.Show();
+
+        // Collapse the setup section immediately once it actually succeeds, rather than waiting
+        // for the next app launch to notice ScaleConfig.IsConfigured() - this is exactly the
+        // "once configured, hide it" moment the user is acting on.
+        if (result == ScaleScanRegistrar.RegisterResult.Success)
+            _setupSectionVisible = false;
+
         RefreshStatus();
     }
 }

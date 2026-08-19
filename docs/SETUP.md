@@ -15,15 +15,26 @@ build-apk.yml` builds it instead on a GitHub-hosted runner, unaffected by that p
 `main` (or trigger it manually from the repo's **Actions** tab), then download the signed
 `ScaleBridge-apk` artifact from the finished run. See the repo's Actions tab for build status.
 
-Note: until the one-time setup below is done, that workflow signs every build with a **fresh
-throwaway keystore generated on each run**, purely so it works out of the box. That means every
-new build must be installed over an *uninstalled* previous copy - Android silently refuses to
-install an update signed by a different key, which is easy to not notice and looks exactly like "I
-installed the new build but the fix didn't work" when it's actually still running the old one.
+**This one-time setup is already done** as of the build that introduced this fix: the
+`ANDROID_KEYSTORE_BASE64` repository secret is set, and `build-apk.yml` uses it automatically -
+every build from here on is signed with the same persisted key, so installing a new build over an
+existing install works exactly like any other app update, with **one exception**: the very first
+build signed with this new persisted key is *itself* signed with a different key than whatever
+throwaway keystore signed your previously-installed copy, so that one specific update still needs
+one last manual uninstall of the old copy first. Every build after that installs in place normally.
 
-### One-time setup: a persisted signing keystore (do this once)
+Before this was done, that workflow signed every build with a **fresh throwaway keystore generated
+on each run**, purely so it worked out of the box - every new build had to be installed over an
+*uninstalled* previous copy, since Android silently refuses to install an update signed by a
+different key, which is easy to not notice and looks exactly like "I installed the new build but
+the fix didn't work" when it's actually still running the old one. That's what the section below
+describes setting up, kept here in case this ever needs to be redone (e.g. the secret is deleted,
+or a new fork/repo needs its own keystore).
 
-So every future build can be installed as a normal in-place update instead:
+### One-time setup: a persisted signing keystore
+
+So every future build can be installed as a normal in-place update instead of a throwaway keystore
+per run:
 
 1. In this repo's **Actions** tab, manually run the **"Generate persistent signing keystore (run
    once)"** workflow (`.github/workflows/generate-keystore.yml`) - it only needs running once,

@@ -33,40 +33,167 @@
                 android:layout_height="wrap_content" />
         </LinearLayout>
 
-        <!-- Last crash card - hidden unless ScaleBridgeApplication/CrashLog recorded one. -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardLastCrash"
-            style="@style/ScaleBridge.SectionCard"
+        <!-- Setup section: status + all three setup steps. Visible by default until the scale is
+             configured, then hidden - toggle via the overflow menu's "Show/hide setup" item, e.g.
+             to reconfigure a different scale later. -->
+        <LinearLayout
+            android:id="@+id/setupSection"
+            android:orientation="vertical"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:visibility="gone">
-            <LinearLayout
-                android:orientation="vertical"
+            android:layout_height="wrap_content">
+
+            <!-- Status card -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/ScaleBridge.SectionCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content">
-                <TextView
-                    style="@style/ScaleBridge.SectionTitle"
-                    android:text="LAST CRASH"
-                    android:textColor="@color/brand_error" />
-                <TextView
-                    android:id="@+id/tvLastCrash"
-                    android:text=""
-                    android:textSize="12sp"
-                    android:textIsSelectable="true"
-                    android:fontFamily="monospace"
-                    android:textColor="@color/brand_text_primary"
+                <LinearLayout
+                    android:orientation="vertical"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnClearCrash"
-                    style="@style/ScaleBridge.Button.Outlined"
-                    android:text="Clear"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
+                    android:layout_height="wrap_content">
+                    <TextView style="@style/ScaleBridge.SectionTitle" android:text="STATUS" />
+                    <TextView
+                        android:id="@+id/tvStatus"
+                        style="@style/ScaleBridge.BodyText"
+                        android:text="Not configured yet."
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-        <!-- Status card -->
+            <!-- Step 1: permissions -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/ScaleBridge.SectionCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+                <LinearLayout
+                    android:orientation="vertical"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+                    <TextView style="@style/ScaleBridge.SectionTitle" android:text="1. GRANT PERMISSIONS" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnPermissions"
+                        style="@style/ScaleBridge.Button"
+                        android:text="Bluetooth &amp; notifications"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnHealthConnect"
+                        style="@style/ScaleBridge.Button.Outlined"
+                        android:text="Health Connect write access"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <TextView
+                        android:id="@+id/tvHealthConnectPermissionStatus"
+                        style="@style/ScaleBridge.BodyText"
+                        android:text=""
+                        android:textSize="12sp"
+                        android:paddingTop="8dp"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Step 2: identify the scale -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/ScaleBridge.SectionCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+                <LinearLayout
+                    android:orientation="vertical"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+                    <TextView style="@style/ScaleBridge.SectionTitle" android:text="2. IDENTIFY YOUR SCALE" />
+                    <TextView
+                        style="@style/ScaleBridge.BodyText"
+                        android:text="Step on the scale so it's advertising, tap Scan, then tap the entry that's your scale to fill in its address."
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnScanDebug"
+                        style="@style/ScaleBridge.Button"
+                        android:text="Scan for nearby BLE devices (15s)"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <TextView
+                        android:id="@+id/tvScanEmpty"
+                        style="@style/ScaleBridge.BodyText"
+                        android:text=""
+                        android:textSize="12sp"
+                        android:paddingTop="8dp"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                    <ListView
+                        android:id="@+id/lvDevices"
+                        android:layout_width="match_parent"
+                        android:layout_height="220dp"
+                        android:layout_marginTop="4dp"
+                        android:divider="@color/brand_divider"
+                        android:dividerHeight="1dp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Step 3: configure -->
+            <com.google.android.material.card.MaterialCardView
+                style="@style/ScaleBridge.SectionCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+                <LinearLayout
+                    android:orientation="vertical"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+                    <TextView style="@style/ScaleBridge.SectionTitle" android:text="3. CONFIGURE THE TARGET SCALE" />
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        app:boxCornerRadiusTopStart="10dp"
+                        app:boxCornerRadiusTopEnd="10dp"
+                        app:boxCornerRadiusBottomStart="10dp"
+                        app:boxCornerRadiusBottomEnd="10dp"
+                        app:boxStrokeColor="@color/brand_primary"
+                        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etMac"
+                            android:hint="MAC address (preferred), e.g. AA:BB:CC:DD:EE:FF"
+                            android:textColor="@color/brand_text_primary"
+                            android:textColorHint="@color/brand_text_secondary"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        app:boxCornerRadiusTopStart="10dp"
+                        app:boxCornerRadiusTopEnd="10dp"
+                        app:boxCornerRadiusBottomStart="10dp"
+                        app:boxCornerRadiusBottomEnd="10dp"
+                        app:boxStrokeColor="@color/brand_primary"
+                        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etName"
+                            android:hint="Advertised name (only used if MAC is blank)"
+                            android:textColor="@color/brand_text_primary"
+                            android:textColorHint="@color/brand_text_secondary"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSave"
+                        style="@style/ScaleBridge.Button"
+                        android:text="Save and start watching for this scale"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+
+        <!-- History: every captured reading, newest first, paginated one week per page. Pending
+             (failed-to-sync) readings are marked inline; "Retry now" only appears while at least
+             one exists anywhere in the history, not just on the visible page. -->
         <com.google.android.material.card.MaterialCardView
             style="@style/ScaleBridge.SectionCard"
             android:layout_width="match_parent"
@@ -75,192 +202,59 @@
                 android:orientation="vertical"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content">
-                <TextView style="@style/ScaleBridge.SectionTitle" android:text="STATUS" />
-                <TextView
-                    android:id="@+id/tvStatus"
-                    style="@style/ScaleBridge.BodyText"
-                    android:text="Not configured yet."
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
+                <TextView style="@style/ScaleBridge.SectionTitle" android:text="HISTORY" />
 
-        <!-- Step 1: permissions -->
-        <com.google.android.material.card.MaterialCardView
-            style="@style/ScaleBridge.SectionCard"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content">
-            <LinearLayout
-                android:orientation="vertical"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content">
-                <TextView style="@style/ScaleBridge.SectionTitle" android:text="1. GRANT PERMISSIONS" />
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnPermissions"
-                    style="@style/ScaleBridge.Button"
-                    android:text="Bluetooth &amp; notifications"
+                <LinearLayout
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnHealthConnect"
-                    style="@style/ScaleBridge.Button.Outlined"
-                    android:text="Health Connect write access"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <TextView
-                    android:id="@+id/tvHealthConnectPermissionStatus"
-                    style="@style/ScaleBridge.BodyText"
-                    android:text=""
-                    android:textSize="12sp"
-                    android:paddingTop="8dp"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
+                    android:layout_height="wrap_content">
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnHistoryOlder"
+                        style="@style/ScaleBridge.Button.Outlined"
+                        android:text="&lt; Older"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+                    <TextView
+                        android:id="@+id/tvHistoryRange"
+                        style="@style/ScaleBridge.BodyText"
+                        android:text=""
+                        android:textSize="12sp"
+                        android:gravity="center"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnHistoryNewer"
+                        style="@style/ScaleBridge.Button.Outlined"
+                        android:text="Newer &gt;"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
 
-        <!-- Step 2: identify the scale -->
-        <com.google.android.material.card.MaterialCardView
-            style="@style/ScaleBridge.SectionCard"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content">
-            <LinearLayout
-                android:orientation="vertical"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content">
-                <TextView style="@style/ScaleBridge.SectionTitle" android:text="2. IDENTIFY YOUR SCALE" />
                 <TextView
+                    android:id="@+id/tvHistoryEmpty"
                     style="@style/ScaleBridge.BodyText"
-                    android:text="Step on the scale so it's advertising, tap Scan, then tap the entry that's your scale to fill in its address."
+                    android:text="No readings yet."
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnScanDebug"
-                    style="@style/ScaleBridge.Button"
-                    android:text="Scan for nearby BLE devices (15s)"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-                <TextView
-                    android:id="@+id/tvScanEmpty"
-                    style="@style/ScaleBridge.BodyText"
-                    android:text=""
-                    android:textSize="12sp"
-                    android:paddingTop="8dp"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
+
                 <ListView
-                    android:id="@+id/lvDevices"
+                    android:id="@+id/lvHistory"
                     android:layout_width="match_parent"
-                    android:layout_height="220dp"
+                    android:layout_height="260dp"
                     android:layout_marginTop="4dp"
                     android:divider="@color/brand_divider"
                     android:dividerHeight="1dp" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
 
-        <!-- Step 3: configure -->
-        <com.google.android.material.card.MaterialCardView
-            style="@style/ScaleBridge.SectionCard"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content">
-            <LinearLayout
-                android:orientation="vertical"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content">
-                <TextView style="@style/ScaleBridge.SectionTitle" android:text="3. CONFIGURE THE TARGET SCALE" />
-
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    app:boxCornerRadiusTopStart="10dp"
-                    app:boxCornerRadiusTopEnd="10dp"
-                    app:boxCornerRadiusBottomStart="10dp"
-                    app:boxCornerRadiusBottomEnd="10dp"
-                    app:boxStrokeColor="@color/brand_primary"
-                    style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/etMac"
-                        android:hint="MAC address (preferred), e.g. AA:BB:CC:DD:EE:FF"
-                        android:textColor="@color/brand_text_primary"
-                        android:textColorHint="@color/brand_text_secondary"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    app:boxCornerRadiusTopStart="10dp"
-                    app:boxCornerRadiusTopEnd="10dp"
-                    app:boxCornerRadiusBottomStart="10dp"
-                    app:boxCornerRadiusBottomEnd="10dp"
-                    app:boxStrokeColor="@color/brand_primary"
-                    style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/etName"
-                        android:hint="Advertised name (only used if MAC is blank)"
-                        android:textColor="@color/brand_text_primary"
-                        android:textColorHint="@color/brand_text_secondary"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnSave"
-                    style="@style/ScaleBridge.Button"
-                    android:text="Save and start watching for this scale"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- Pending syncs card - hidden unless PendingSyncStore has readings that were captured
-             but failed to write to Health Connect and haven't been retried successfully yet. -->
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardPendingSync"
-            style="@style/ScaleBridge.SectionCard"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:visibility="gone">
-            <LinearLayout
-                android:orientation="vertical"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content">
-                <TextView
-                    style="@style/ScaleBridge.SectionTitle"
-                    android:text="PENDING SYNCS"
-                    android:textColor="@color/brand_error" />
-                <TextView
-                    android:id="@+id/tvPendingSync"
-                    style="@style/ScaleBridge.BodyText"
-                    android:text=""
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnRetryPending"
                     style="@style/ScaleBridge.Button"
-                    android:text="Retry now"
+                    android:text="Retry pending now"
+                    android:layout_marginTop="4dp"
                     android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- Last sync -->
-        <com.google.android.material.card.MaterialCardView
-            style="@style/ScaleBridge.SectionCard"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content">
-            <LinearLayout
-                android:orientation="vertical"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content">
-                <TextView style="@style/ScaleBridge.SectionTitle" android:text="LAST SYNC" />
-                <TextView
-                    android:id="@+id/tvLastSync"
-                    style="@style/ScaleBridge.BodyText"
-                    android:text="No sync yet."
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
+                    android:layout_height="wrap_content"
+                    android:visibility="gone" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

@@ -49,8 +49,21 @@ public static class ScaleScanRegistrar
         // Android.Bluetooth.ScanMode (classic Bluetooth discoverability) and
         // Android.Bluetooth.LE.ScanMode (BLE scan power/latency tradeoff) share a short name;
         // ScanSettings.Builder.SetScanMode needs the LE one, qualified to avoid ambiguity.
+        //
+        // CallbackType.FirstMatch (rather than the default AllMatches) tells the OS to only
+        // deliver a broadcast the first time the scale's advertisement is seen, not every time it
+        // re-advertises while still in range - some scales (including the one this app targets)
+        // keep advertising periodically even when idle/not being stood on, which with AllMatches
+        // produced a fresh "please step on the scale"/"sync failed" notification roughly once a
+        // minute indefinitely. This is the OS-level fix; ScaleScanReceiver's own
+        // ScanCooldownStore check is a deliberate, guaranteed-to-work backstop on top of it, in
+        // case FirstMatch's redelivery suppression doesn't fully hold for a PendingIntent-based
+        // scan (unlike a live ScanCallback session, there's no continuous "session" here to attach
+        // first-match state to, and this project has been burned before by real devices not
+        // matching documented Android behaviour - see docs/PROTOCOL_CONFIRMATION.md).
         var settings = new ScanSettings.Builder()
             .SetScanMode(Android.Bluetooth.LE.ScanMode.LowPower)
+            .SetCallbackType(ScanCallbackType.FirstMatch)
             .Build();
 
         var pendingIntent = BuildPendingIntent(context);
