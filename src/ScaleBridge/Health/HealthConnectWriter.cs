@@ -30,9 +30,22 @@ public static class HealthConnectWriter
     private const string PermissionControllerJavaClassName = "androidx.health.connect.client.PermissionController";
     private const string WeightRecordJavaClassName = "androidx.health.connect.client.records.WeightRecord";
     private const string MetadataJavaClassName = "androidx.health.connect.client.records.metadata.Metadata";
+    private const string DataOriginJavaClassName = "androidx.health.connect.client.records.metadata.DataOrigin";
+    private const string DeviceJavaClassName = "androidx.health.connect.client.records.metadata.Device";
     private const string InstantJavaClassName = "java.time.Instant";
     private const string ZoneOffsetJavaClassName = "java.time.ZoneOffset";
     private const string MassJavaClassName = "androidx.health.connect.client.units.Mass";
+    private const string StringJavaClassName = "java.lang.String";
+
+    // androidx.health.connect.client.HealthConnectClient.DEFAULT_PROVIDER_PACKAGE_NAME (internal,
+    // but a stable literal - confirmed against the real source for the exact connect-client
+    // version this project pins, see CreatePermissionRequestContract).
+    private const string DefaultProviderPackageName = "com.google.android.apps.healthdata";
+
+    // androidx.health.connect.client.records.metadata.Metadata.RECORDING_METHOD_MANUAL_ENTRY -
+    // confirmed against the real source for the exact connect-client version this project pins,
+    // see CreateMetadata.
+    private const int RecordingMethodManualEntry = 3;
 
     public static bool IsAvailable(Context context)
     {
@@ -72,15 +85,30 @@ public static class HealthConnectWriter
     /// binding is apparently a synthetic/static-only helper type with no real, separately
     /// loadable Java class of its own for `FromType`'s <c>JNIEnv.FindClass(Type)</c> to resolve,
     /// unlike concrete Kotlin classes such as <c>Mass</c> - see docs/PROTOCOL_CONFIRMATION.md).
+    ///
+    /// The real function is
+    /// <c>@JvmStatic @JvmOverloads fun createRequestPermissionResultContract(providerPackageName:
+    /// String = DEFAULT_PROVIDER_PACKAGE_NAME)</c> - confirmed against the real
+    /// <c>connect-client:1.1.0-alpha07</c> source (the exact version
+    /// <c>ScaleBridge.csproj</c> pins - fetched via its Maven `-sources.jar`, since the AndroidX
+    /// source browsable at HEAD on androidx-main turned out to be a materially different, newer
+    /// API surface than what this app actually compiles/runs against - see
+    /// <see cref="CreateMetadata"/> for where that distinction mattered even more). This calls
+    /// the real one-argument overload directly with that exact default value, rather than
+    /// `GetMethod` with zero parameter types for the `@JvmOverloads`-generated convenience
+    /// overload: the identical `@JvmStatic`+`@JvmOverloads` combination on
+    /// <c>Metadata.manualEntry</c> was confirmed on a real device to *not* bridge its
+    /// zero-argument form onto the outer type, so this avoids relying on that same assumption
+    /// holding here too.
     /// </summary>
     public static AndroidX.Activity.Result.Contract.ActivityResultContract CreatePermissionRequestContract(Context context)
     {
-        using var controllerClass = context.ClassLoader!.LoadClass(PermissionControllerJavaClassName)!;
-        // The real method has a @JvmOverloads default parameter (an optional provider package
-        // name); GetMethod with zero parameter types resolves the generated no-arg overload,
-        // avoiding any need to know/guess the default package name string.
-        using var method = controllerClass.GetMethod("createRequestPermissionResultContract");
-        var result = method.Invoke(null);
+        using var classLoader = context.ClassLoader!;
+        using var stringClass = classLoader.LoadClass(StringJavaClassName)!;
+        using var controllerClass = classLoader.LoadClass(PermissionControllerJavaClassName)!;
+        using var method = controllerClass.GetMethod("createRequestPermissionResultContract", stringClass);
+        using var providerPackageName = new Java.Lang.String(DefaultProviderPackageName);
+        var result = method.Invoke(null, providerPackageName);
         return (AndroidX.Activity.Result.Contract.ActivityResultContract)result!;
     }
 
@@ -132,89 +160,45 @@ public static class HealthConnectWriter
     ///
     /// This previously called <c>new WeightRecord(instant, null, weight, null)</c> directly, which
     /// compiled fine but crashed at runtime with "parameter specified as non-null is null: method
-    /// androidx.health.connect.client.records.WeightRecord.&lt;init&gt;": the real Kotlin
-    /// constructor's 4th parameter (<c>metadata: Metadata</c>) only has a default value
-    /// (<c>Metadata.EMPTY</c>) for callers going through Kotlin itself - a direct JVM constructor
-    /// call (which is what a bound C# `new WeightRecord(...)` compiles down to) has no such
-    /// default and requires a real, non-null <c>Metadata</c> instance. (The 2nd parameter,
-    /// <c>zoneOffset</c>, is genuinely nullable in the real API, so passing <see langword="null"/>
-    /// for that one is correct and not the cause of this error.)
+    /// androidx.health.connect.client.records.WeightRecord.&lt;init&gt;": the real 4th
+    /// constructor parameter, <c>metadata: Metadata</c>, has no default from a direct JVM
+    /// constructor call (which is what a bound C# `new WeightRecord(...)` compiles down to),
+    /// only from Kotlin call sites. (The 2nd parameter, <c>zoneOffset</c>, is genuinely nullable
+    /// in the real API, so passing <see langword="null"/> for that one is, and always was,
+    /// correct.)
     ///
-    /// Confirmed against the real AndroidX Kotlin source
-    /// (androidx.health.connect.client.records.metadata.Metadata.kt) that <c>Metadata</c>'s
-    /// constructor is <c>internal</c> - it can only be built via one of its companion's
-    /// <c>@JvmStatic</c> factory functions, of which <c>manualEntry()</c> (an
-    /// <c>@JvmOverloads</c> function whose zero-argument overload defaults its optional
-    /// <c>device</c> parameter to <see langword="null"/>) is the correct one for a manually
-    /// captured scale reading like this app's.
+    /// Getting from there to a real, non-null <see cref="CreateMetadata"/> took four attempts on
+    /// a real device - see docs/PROTOCOL_CONFIRMATION.md for the full history of the first three
+    /// (a `Class.ForName` caller-classloader bug, a `Class.FromType` bug specific to Kotlin
+    /// interfaces-with-companions, and a `Metadata.manualEntry()` zero-argument overload that
+    /// doesn't actually exist as a direct static bridge). The root cause of that fourth attempt,
+    /// and the reason this doc comment doesn't just describe a fifth reflection variant, is more
+    /// fundamental: every one of those attempts (and this method's original design generally) was
+    /// based on <c>Metadata.kt</c>/<c>WeightRecord.kt</c> as they exist today on the
+    /// `androidx-main` development branch, browsed directly on
+    /// <c>android.googlesource.com</c> - but `ScaleBridge.csproj` actually pins
+    /// <c>androidx.health.connect:connect-client</c> to a specific, much older released version,
+    /// <c>1.1.0-alpha07</c>. Downloading that exact version's real `-sources.jar` from Google's
+    /// Maven repository (<c>https://maven.google.com/androidx/health/connect/connect-client/
+    /// 1.1.0-alpha07/connect-client-1.1.0-alpha07-sources.jar</c>) and extracting the real
+    /// `Metadata.kt` it ships showed a materially different, much simpler API: no `manualEntry`
+    /// factory function exists at all in this version, no `EMPTY` constant is public, and
+    /// `Metadata`'s constructor - unlike the `internal` one on `androidx-main` - is a plain
+    /// <b>public</b> Kotlin constructor with every parameter defaulted:
+    /// <c>Metadata(id: String = "", dataOrigin: DataOrigin = DataOrigin(""), lastModifiedTime:
+    /// Instant = Instant.EPOCH, clientRecordId: String? = null, clientRecordVersion: Long = 0,
+    /// device: Device? = null, recordingMethod: Int = RECORDING_METHOD_UNKNOWN)</c>. This
+    /// constructor has no <c>@JvmOverloads</c>, so (like `WeightRecord`'s own constructor, also
+    /// re-confirmed against this exact version's real source) the single real JVM constructor
+    /// requires every parameter supplied explicitly - no bitmask-based "skip these, use defaults"
+    /// mechanism is needed or usable from plain reflection - which <see cref="CreateMetadata"/>
+    /// does directly, with no further guessing.
     ///
-    /// The <c>Metadata.manualEntry()</c> call and the <c>WeightRecord</c> construction are both
-    /// done here via plain Java reflection, rather than as direct C# calls, deliberately
-    /// following the same pattern as <see cref="CreateMassInKilograms"/> immediately below: this
-    /// sidesteps needing to know/guess what the .NET binding generator actually calls the
-    /// <c>Metadata</c> type (it lives in a Kotlin subpackage,
-    /// <c>androidx.health.connect.client.records.metadata</c>, that this file has no existing
-    /// `using` for, and this project has repeatedly hit binding-generator naming surprises - see
-    /// docs/PROTOCOL_CONFIRMATION.md) and instead depends only on the real, source-confirmed JVM
-    /// class/method names. The final result is cast back to the concrete, already-used
-    /// <see cref="WeightRecord"/> type (not the untyped reflection result), so the rest of this
-    /// method can use it exactly as before.
-    ///
-    /// This has already gone through three failed fix attempts on a real device, all replaced
-    /// here - see docs/PROTOCOL_CONFIRMATION.md for the full history:
-    ///
-    /// 1. Looking up every class here by name via <c>Java.Lang.Class.ForName(name)</c>. Built and
-    ///    ran, but the "last sync error" on a real device was just the bare string
-    ///    <c>androidx.health.connect.client.records.metadata.Metadata</c> - the signature of a
-    ///    JVM <c>ClassNotFoundException</c> (whose message is only ever the class name). Root
-    ///    cause: <c>Class.forName(String)</c>'s single-argument overload resolves against
-    ///    whatever <c>ClassLoader</c> the *calling Java stack frame* belongs to, which is
-    ///    meaningless for a call made via JNI from managed/Mono code rather than a real Java
-    ///    caller, and can miss classes that only exist in the app's Maven-resolved dependency dex.
-    /// 2. Resolving the classes that already have known, working C# bindings
-    ///    (<c>WeightRecord</c>, <c>Instant</c>, <c>ZoneOffset</c>, <c>Mass</c>) via
-    ///    <c>Java.Lang.Class.FromType(typeof(...))</c> instead, and loading <c>Metadata</c> (which
-    ///    has no confirmed C# binding) through <c>weightRecordClass.ClassLoader</c>. This also
-    ///    built and ran, but crashed <em>earlier</em> than the write path entirely: the identical
-    ///    <c>FromType</c> approach, applied to <see cref="CreatePermissionRequestContract"/> for
-    ///    <see cref="HealthConnectClient"/>, threw
-    ///    <c>ClassNotFoundException: mono.internal.androidx.health.connect.client.HealthConnectClient</c>
-    ///    from <c>MainActivity.OnCreate</c> - <c>HealthConnectClient</c> is a Kotlin interface
-    ///    with a companion object, and apparently has no real, separately loadable Java class for
-    ///    <c>FromType</c>'s <c>JNIEnv.FindClass(Type)</c> to resolve (unlike concrete Kotlin
-    ///    classes like <c>Mass</c>, which is why <see cref="CreateMassInKilograms"/> was never
-    ///    affected). That specific call was caught by `MainActivity`'s existing defensive
-    ///    try/catch, which is also why "Health Connect available" showed as unavailable/disabled
-    ///    afterwards - not a real availability check failure, a swallowed startup exception.
-    /// 3. Switching to <c>Context.getClassLoader()</c> for every class lookup (fixing both of the
-    ///    above), but still assuming <c>Metadata.manualEntry()</c> (zero-argument) existed as a
-    ///    plain <c>public static</c> method directly on the outer <c>Metadata</c> class - the
-    ///    <c>@JvmStatic</c> annotation on a companion function is *supposed* to bridge it there.
-    ///    Built and ran, but threw <c>NoSuchMethodException:
-    ///    androidx.health.connect.client.records.metadata.Metadata.manualEntry []</c> from
-    ///    <c>Class.GetMethod("manualEntry")</c> - that specific zero-argument bridge evidently
-    ///    isn't generated on the outer class for this function (whether because
-    ///    <c>@JvmStatic</c>+<c>@JvmOverloads</c> together don't bridge every reduced-arity
-    ///    overload, or some other Kotlin-compiler-version-specific detail), even though the
-    ///    one-argument <c>manualEntry(Device)</c> form and/or the real implementation on
-    ///    <c>Metadata$Companion</c> presumably still exist somewhere.
-    ///
-    /// Fixed by no longer guessing a single specific (declaring class, method name, arity)
-    /// combination at all: <see cref="FindAndInvokeManualEntry"/> below searches the real,
-    /// actually-reachable public methods at runtime - first every public method directly on
-    /// <c>Metadata</c> (in case a compatible static bridge does exist), then every public
-    /// instance method on the singleton <c>Metadata.Companion</c> object (which is *guaranteed*
-    /// to have a real, callable implementation of every companion function, since that's what
-    /// <c>@JvmStatic</c> bridges are bridging *to* - obtained via the actual companion field's
-    /// value's own <see cref="Java.Lang.Object.Class"/>, not a guessed
-    /// <c>"Metadata$Companion"</c> class name) - and calls whichever `manualEntry` overload it
-    /// finds first, with zero or one (null) arguments as appropriate. This is more code than
-    /// hard-coding one exact call, but after three wrong guesses about this library's exact
-    /// Kotlin-to-JVM bridging shape in a row, discovering it at runtime is more reliable than a
-    /// fourth guess. `CreatePermissionRequestContract`'s equivalent zero-argument
-    /// `createRequestPermissionResultContract()` lookup is left as a direct `GetMethod` call
-    /// since that one is confirmed working (it's an ordinary interface companion function, not
-    /// one combining `@JvmStatic` with `@JvmOverloads` on a reduced-arity overload like this one).
+    /// Lesson for next time (recorded here since this is the highest-risk file in the project):
+    /// when a Kotlin/Java class's *real, currently-compiled-against* API surface actually matters
+    /// (as opposed to just its class/package name), fetch the sources jar for the exact pinned
+    /// version from Maven - `androidx-main`/HEAD source is not a reliable stand-in for an older
+    /// pinned release and materially misled every attempt before this one.
     /// </summary>
     private static WeightRecord CreateWeightRecord(Context context, Java.Time.Instant instant, Mass weight)
     {
@@ -225,7 +209,7 @@ public static class HealthConnectWriter
         using var massClass = classLoader.LoadClass(MassJavaClassName)!;
         using var metadataClass = classLoader.LoadClass(MetadataJavaClassName)!;
 
-        using var metadata = FindAndInvokeManualEntry(metadataClass);
+        using var metadata = CreateMetadata(classLoader, metadataClass);
 
         using var constructor = weightRecordClass.GetConstructor(instantClass, zoneOffsetClass, massClass, metadataClass);
         var result = constructor.NewInstance(instant, null, weight, metadata);
@@ -233,77 +217,44 @@ public static class HealthConnectWriter
     }
 
     /// <summary>
-    /// Finds and calls a callable <c>manualEntry</c> overload for <paramref name="metadataClass"/>
-    /// (<c>androidx.health.connect.client.records.metadata.Metadata</c>), without assuming in
-    /// advance whether it's a zero- or one-argument overload, or whether it lives directly on the
-    /// class (as a <c>@JvmStatic</c> bridge) or only on the real <c>Metadata.Companion</c>
-    /// instance - see the longer explanation on <see cref="CreateWeightRecord"/> for why this
-    /// discovers it at runtime instead of hard-coding another guess.
+    /// Builds a real <c>Metadata</c> instance for a manually-captured scale reading, by calling
+    /// its real public constructor directly - see the longer explanation on
+    /// <see cref="CreateWeightRecord"/> for how its actual shape (for the exact
+    /// <c>connect-client:1.1.0-alpha07</c> version this project pins) was confirmed:
+    /// <c>Metadata(id: String, dataOrigin: DataOrigin, lastModifiedTime: Instant, clientRecordId:
+    /// String?, clientRecordVersion: Long, device: Device?, recordingMethod: Int)</c>, with no
+    /// <c>@JvmOverloads</c>, so every parameter must be supplied explicitly. Values passed here
+    /// match the Kotlin-side defaults exactly (an empty `id`/`DataOrigin("")`, `Instant.EPOCH`,
+    /// no client record id/version, no device), except <c>recordingMethod</c>, which is set to
+    /// the real <c>RECORDING_METHOD_MANUAL_ENTRY</c> constant (confirmed value <c>3</c>) instead
+    /// of its own default (<c>RECORDING_METHOD_UNKNOWN</c>), since that's an accurate, genuinely
+    /// better description of how this app's readings are actually captured.
     /// </summary>
-    private static Java.Lang.Object FindAndInvokeManualEntry(Java.Lang.Class metadataClass)
+    private static Java.Lang.Object CreateMetadata(Java.Lang.ClassLoader classLoader, Java.Lang.Class metadataClass)
     {
-        if (TryInvokeManualEntry(metadataClass, receiver: null, out var metadata))
-            return metadata;
+        using var stringClass = classLoader.LoadClass(StringJavaClassName)!;
+        using var dataOriginClass = classLoader.LoadClass(DataOriginJavaClassName)!;
+        using var instantClass = classLoader.LoadClass(InstantJavaClassName)!;
+        using var deviceClass = classLoader.LoadClass(DeviceJavaClassName)!;
+        using var longType = Java.Lang.Long.Type!;
+        using var intType = Java.Lang.Integer.Type!;
 
-        using (var companionField = metadataClass.GetField("Companion"))
-        using (var companion = companionField.Get(null))
-        {
-            if (companion is not null)
-            {
-                using var companionClass = companion.Class;
-                if (TryInvokeManualEntry(companionClass, companion, out metadata))
-                    return metadata;
-            }
-        }
+        // DataOrigin(packageName: String) - a plain, single-argument public constructor with no
+        // default of its own, matching Metadata's own default of DataOrigin("").
+        using var dataOriginConstructor = dataOriginClass.GetConstructor(stringClass);
+        using var emptyPackageName = new Java.Lang.String(string.Empty);
+        using var dataOrigin = dataOriginConstructor.NewInstance(emptyPackageName);
 
-        throw new InvalidOperationException(
-            "Could not find a callable Metadata.manualEntry(...) overload via reflection " +
-            "(checked public methods on both the Metadata class and its Companion instance).");
-    }
+        using var epoch = Java.Time.Instant.Epoch!;
 
-    /// <summary>
-    /// Looks for a public method named <c>manualEntry</c> taking zero or one parameters on
-    /// <paramref name="declaringClass"/>, and invokes the first one found against
-    /// <paramref name="receiver"/> (<see langword="null"/> for a static method, the real
-    /// <c>Metadata.Companion</c> instance for an instance method on it), passing
-    /// <see langword="null"/> for the one-parameter case (the real Kotlin function's only
-    /// parameter, <c>device</c>, is nullable/optional).
-    /// </summary>
-    private static bool TryInvokeManualEntry(Java.Lang.Class declaringClass, Java.Lang.Object? receiver, out Java.Lang.Object metadata)
-    {
-        // GetMethods()/GetParameterTypes() return plain C# arrays of JNI-backed objects, not a
-        // disposable container of their own - each element is disposed individually below.
-        var methods = declaringClass.GetMethods()!;
-        foreach (var method in methods)
-        {
-            using (method)
-            {
-                if (method.Name != "manualEntry")
-                    continue;
-
-                var parameterTypes = method.GetParameterTypes()!;
-                try
-                {
-                    switch (parameterTypes.Length)
-                    {
-                        case 0:
-                            metadata = method.Invoke(receiver)!;
-                            return true;
-                        case 1:
-                            metadata = method.Invoke(receiver, (Java.Lang.Object?)null)!;
-                            return true;
-                    }
-                }
-                catch (Java.Lang.Exception)
-                {
-                    // This specific overload wasn't actually callable this way (e.g. a
-                    // non-nullable parameter that rejected null) - keep looking.
-                }
-            }
-        }
-
-        metadata = null!;
-        return false;
+        using var metadataConstructor = metadataClass.GetConstructor(
+            stringClass, dataOriginClass, instantClass, stringClass, longType, deviceClass, intType);
+        using var emptyId = new Java.Lang.String(string.Empty);
+        using var clientRecordVersion = new Java.Lang.Long(0L);
+        using var recordingMethod = new Java.Lang.Integer(RecordingMethodManualEntry);
+        var result = metadataConstructor.NewInstance(
+            emptyId, dataOrigin, epoch, null, clientRecordVersion, null, recordingMethod);
+        return result!;
     }
 
     /// <summary>

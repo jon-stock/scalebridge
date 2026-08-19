@@ -644,6 +644,82 @@ more reliable than continuing to guess. `CreatePermissionRequestContract`'s equi
 interface companion function with no `@JvmOverloads` reduced-arity complication, and not
 implicated in any failure seen so far).
 
+## Fifth error, and the actual root cause of all five: the wrong Kotlin source was consulted
+
+The runtime-discovery fix above was installed and tested. It failed too, with a clear, specific
+exception this time (its own explicit failure message, not an obscure JVM one):
+
+```
+System.InvalidOperationException: Could not find a callable Metadata.manualEntry(...) overload via
+reflection (checked public methods on both the Metadata class and its Companion instance).
+```
+
+Neither the `Metadata` class nor its real `Companion` instance had *any* public method literally
+named `manualEntry`, of any arity. That ruled out every remaining "which overload/bridge shape"
+theory at once - if the method genuinely isn't reachable by that name anywhere, guessing another
+arity or another declaring class was never going to work.
+
+This prompted checking an assumption that had been silently wrong across every one of the four
+previous attempts: **all of them were based on reading `Metadata.kt`/`WeightRecord.kt`/
+`PermissionController.kt` as they exist today on the `androidx-main` development branch**, fetched
+directly from `android.googlesource.com`. But `ScaleBridge.csproj`'s actual `AndroidMavenLibrary`
+reference pins a specific, much older released version:
+
+```xml
+<AndroidMavenLibrary Include="androidx.health.connect:connect-client" Version="1.1.0-alpha07" ... />
+```
+
+`androidx-main` is the bleeding-edge, unreleased development branch - it is *not* representative of
+what an old `1.1.0-alpha07` release actually contains, and connect-client's public API (especially
+around `Metadata`) has evolved a great deal since alpha07. Every reflection attempt so far had been
+faithfully, correctly implementing an API that simply isn't what this app is actually compiled and
+running against.
+
+Fixed by downloading the *exact* pinned version's real sources instead of guessing from HEAD:
+
+```powershell
+Invoke-WebRequest -Uri "https://maven.google.com/androidx/health/connect/connect-client/1.1.0-alpha07/connect-client-1.1.0-alpha07-sources.jar" -OutFile sources.jar
+# rename to .zip, then Expand-Archive to inspect the real .kt files inside
+```
+
+The real `1.1.0-alpha07` `Metadata.kt` is a completely different, much simpler shape than the
+`androidx-main` version every previous fix assumed:
+
+- No `manualEntry` (or any other named) factory function exists at all - that whole family of
+  companion factory functions was added in a later connect-client version.
+- No public `EMPTY` constant (the real one, `Metadata.EMPTY`, is `@JvmField internal`).
+- `Metadata`'s constructor is a plain **public** Kotlin constructor (not `internal`, as
+  `androidx-main` has it), with every parameter defaulted:
+  `Metadata(id: String = "", dataOrigin: DataOrigin = DataOrigin(""), lastModifiedTime: Instant =
+  Instant.EPOCH, clientRecordId: String? = null, clientRecordVersion: Long = 0, device: Device? =
+  null, recordingMethod: Int = RECORDING_METHOD_UNKNOWN)` - no `@JvmOverloads`, so the one real JVM
+  constructor requires every parameter (no bitmask-skip mechanism usable from plain reflection).
+  `RECORDING_METHOD_MANUAL_ENTRY = 3` is a real, useful constant to set explicitly here even though
+  it isn't the parameter's own default.
+- `WeightRecord.kt` for this same version was re-checked too and, reassuringly, is identical in
+  shape to what every previous attempt already assumed (`WeightRecord(Instant, ZoneOffset?, Mass,
+  Metadata = Metadata.EMPTY)`, also with no `@JvmOverloads`) - that part was never actually wrong.
+- `PermissionController.kt` for this same version has the *identical*
+  `@JvmStatic @JvmOverloads fun createRequestPermissionResultContract(providerPackageName: String =
+  DEFAULT_PROVIDER_PACKAGE_NAME)` shape that just failed for `Metadata.manualEntry` - since that
+  specific combination is now confirmed to not reliably bridge its zero-argument form,
+  `CreatePermissionRequestContract` was pre-emptively fixed the same way (calling the real
+  one-argument overload directly, with the real `DEFAULT_PROVIDER_PACKAGE_NAME` value,
+  `"com.google.android.apps.healthdata"`, confirmed from `HealthConnectClient.kt` in the same
+  sources jar) rather than waiting to hit the identical bug a second time on a different class.
+
+`CreateMetadata` and the updated `CreatePermissionRequestContract` in `HealthConnectWriter.cs` now
+call these real, version-confirmed constructors/methods directly, with no further searching or
+guessing.
+
+**Lesson for anything else touched in this file going forward:** when a Kotlin/Java class's real,
+currently-compiled-against API surface matters (not just its class/package name), fetch the
+`-sources.jar` for the *exact pinned version* from Maven
+(`https://maven.google.com/<group-path>/<artifact>/<version>/<artifact>-<version>-sources.jar`,
+or search `search.maven.org`/`mvnrepository.com` for the artifact to confirm the path) rather than
+reading `androidx-main`/HEAD source on `android.googlesource.com` - HEAD is not a reliable stand-in
+for an older pinned release, and did materially mislead every attempt before this one.
+
 ## Crash: `startForegroundService() not allowed due to mAllowStartForeground false`
 
 A real-device crash, unrelated to Health Connect - this one is `ScaleScanReceiver.OnReceive`
