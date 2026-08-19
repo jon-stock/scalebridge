@@ -104,8 +104,20 @@ public class ScaleConnectionService : Service
             catch (Exception ex)
             {
                 Log.Error(LogTag, $"Failed to write to Health Connect: {ex}");
-                StatusStore.RecordError(this, ex.Message, DateTimeOffset.UtcNow);
-                SyncNotifier.PostError(this, $"Captured {weightKg:0.0} kg but Health Connect write failed: {ex.Message}");
+
+                // ex.Message alone is frequently useless for Java/JNI exceptions surfaced through
+                // this bridge (e.g. a bare ClassNotFoundException's message is just the class
+                // name, with no indication of what threw or why) - see
+                // docs/PROTOCOL_CONFIRMATION.md. CrashLog.Record persists the full ex.ToString()
+                // (managed exception chain, plus the underlying Java stack trace/"Caused by"
+                // section for JNI exceptions) both to SharedPreferences, surfaced by MainActivity's
+                // existing "Last crash" card, and to crash_log.txt for adb/MTP retrieval - without
+                // this actually being a fatal, unhandled crash.
+                CrashLog.Record(this, ex);
+
+                string shortDetail = $"{ex.GetType().Name}: {ex.Message}";
+                StatusStore.RecordError(this, $"{shortDetail} (see \"Last crash\" for full details)", DateTimeOffset.UtcNow);
+                SyncNotifier.PostError(this, $"Captured {weightKg:0.0} kg but Health Connect write failed: {shortDetail}");
             }
             finally
             {

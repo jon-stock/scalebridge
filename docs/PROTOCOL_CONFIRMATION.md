@@ -476,3 +476,61 @@ binding actually calls that type. The reflection result is cast back to the conc
 This fix has not yet been re-verified against a real Health Connect instance on a device; per this
 document's ongoing pattern, if a *different* null/type error appears next, the newly-added
 `CreateWeightRecord` is the first place to look.
+
+## Second Health Connect crash: bare "androidx.health.connect.client.records.metadata.Metadata"
+
+The fix above was installed and tested on the real device. The null-metadata crash was gone, but
+the write still failed - the notification read "Captured 100.0 kg but Health Connect write failed:
+androidx.health.connect.client.reco..." (truncated by Android's notification text limit) and the
+"Last sync error" card (not length-limited) showed the full message verbatim: just
+`androidx.health.connect.client.records.metadata.Metadata`, with no other words at all.
+
+That bare "just the class name, nothing else" shape is the signature of a JVM
+`ClassNotFoundException` (its `getMessage()` really is only ever the class name it failed to
+find) - not a new variant of the null-metadata bug. Root cause: `CreateWeightRecord`'s first fix
+attempt resolved *every* class it needed - including `WeightRecord`, `Instant`, `ZoneOffset`, and
+`Mass`, all four of which already have known, working, directly-usable C# bindings - via
+`Java.Lang.Class.ForName(name)`, the same single-argument overload already used (and, as far as
+this document knew at the time, apparently working) in `CreatePermissionRequestContract`.
+`Class.forName(String)`'s single-argument overload resolves against whatever `ClassLoader` the
+*calling Java stack frame* belongs to. That resolution has no reliable meaning here: these calls
+are invoked via JNI from managed/Mono code, not from an actual Java/Kotlin call site, so there is
+no normal caller stack frame for it to inspect, and it can end up resolving against a classloader
+(e.g. the platform/bootstrap one) that was never given access to this app's Maven-resolved
+`connect-client` dependency dex in the first place - explaining why a real, present class
+(`Metadata` genuinely exists and ships in the APK) can still throw `ClassNotFoundException`.
+
+Fixed in `CreateWeightRecord` two ways at once:
+
+- The four classes that already have real, known C# bindings (`WeightRecord`, `Instant`,
+  `ZoneOffset`, `Mass`) are now resolved via `Java.Lang.Class.FromType(typeof(...))` instead of
+  `ForName(name)` - the same reliable mechanism `CreateMassInKilograms` already used for `Mass`,
+  which sidesteps the whole caller-classloader question by asking Mono's Java.Interop layer for
+  the class of an already-bound managed peer type directly, rather than searching for it by name.
+- `Metadata` has no known C# binding to call `FromType` on (that's the entire reason it's resolved
+  by name at all - see above), but it doesn't need `Class.forName`'s ambiguous caller-classloader
+  behaviour either: it's loaded via `weightRecordClass.ClassLoader!.LoadClass(name)` instead - the
+  exact `ClassLoader` that successfully loaded `WeightRecord` a moment earlier via the reliable
+  `FromType` path. Since `WeightRecord` and `Metadata` come from the same library/dex, that
+  classloader is guaranteed to already have access to `Metadata` too.
+
+`CreatePermissionRequestContract`'s pre-existing `Class.ForName(PermissionControllerJavaClassName)`
+call has the identical latent bug - it happened not to have thrown yet only because the Health
+Connect permission grant flow hadn't been re-tested since the "go via Health Connect" settings
+fix earlier in this document, not because it's actually safe. Fixed the same way, pre-emptively,
+using `HealthConnectClient`'s `ClassLoader` (a real, already-used, definitely-working class) to
+load `PermissionController` by name instead of `Class.ForName(name)` directly.
+
+Separately, since diagnosing this relied entirely on `ex.Message` alone being visible (which,
+for exactly this class of JVM exception, is nearly useless on its own), the Health Connect
+write-failure catch block in `ScaleConnectionService.OnWeightCaptured` now also calls
+`CrashLog.Record(this, ex)` - the same full-detail (`ex.ToString()`, including the underlying Java
+stack trace/"Caused by" chain for JNI exceptions) persistence mechanism `ScaleBridgeApplication`'s
+global handler and `MainActivity`'s permission-contract try/catch already used, surfaced via the
+existing "Last crash" card - without this being a fatal, unhandled crash. The short "Last sync
+error" text and notification now also include the exception's type name
+(e.g. `ClassNotFoundException: ...`) alongside its message, and point at "Last crash" for the
+full detail. This is a pure diagnostics improvement, independent of whether the classloader fix
+above turns out to be complete - if a third Health Connect error appears, "Last crash" should now
+contain enough information (real exception type, real message, real stack trace) to diagnose it
+without another round trip like this one.

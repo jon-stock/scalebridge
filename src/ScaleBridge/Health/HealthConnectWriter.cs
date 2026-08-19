@@ -28,11 +28,7 @@ public static class HealthConnectWriter
 
     public const string WriteWeightPermission = "android.permission.health.WRITE_WEIGHT";
     private const string PermissionControllerJavaClassName = "androidx.health.connect.client.PermissionController";
-    private const string WeightRecordJavaClassName = "androidx.health.connect.client.records.WeightRecord";
     private const string MetadataJavaClassName = "androidx.health.connect.client.records.metadata.Metadata";
-    private const string InstantJavaClassName = "java.time.Instant";
-    private const string ZoneOffsetJavaClassName = "java.time.ZoneOffset";
-    private const string MassJavaClassName = "androidx.health.connect.client.units.Mass";
 
     public static bool IsAvailable(Context context)
     {
@@ -58,10 +54,18 @@ public static class HealthConnectWriter
     /// generator actually ends up calling things. Reflection sidesteps needing to know that at
     /// all: it only depends on the real, source-confirmed Java class/method name, plus the
     /// separately-referenced, long-established `AndroidX.Activity` binding for the return type.
+    ///
+    /// The class itself is looked up via <see cref="HealthConnectClient"/>'s own `ClassLoader`
+    /// (see the equivalent, real-device-confirmed fix in <see cref="CreateWeightRecord"/> for
+    /// why <c>Java.Lang.Class.ForName(string)</c> alone is not reliable for this library's
+    /// classes when called via JNI from managed code, rather than a direct Java/Kotlin call
+    /// site) instead of the single-argument <c>Class.ForName(name)</c> this used previously.
     /// </summary>
     public static AndroidX.Activity.Result.Contract.ActivityResultContract CreatePermissionRequestContract()
     {
-        using var controllerClass = Java.Lang.Class.ForName(PermissionControllerJavaClassName);
+        using var clientClass = Java.Lang.Class.FromType(typeof(HealthConnectClient));
+        using var classLoader = clientClass.ClassLoader!;
+        using var controllerClass = classLoader.LoadClass(PermissionControllerJavaClassName)!;
         // The real method has a @JvmOverloads default parameter (an optional provider package
         // name); GetMethod with zero parameter types resolves the generated no-arg overload,
         // avoiding any need to know/guess the default package name string.
@@ -134,8 +138,8 @@ public static class HealthConnectWriter
     /// <c>device</c> parameter to <see langword="null"/>) is the correct one for a manually
     /// captured scale reading like this app's.
     ///
-    /// Both the <c>Metadata.manualEntry()</c> call and the entire <c>WeightRecord</c> construction
-    /// are done here via plain Java reflection, rather than as direct C# calls, deliberately
+    /// The <c>Metadata.manualEntry()</c> call and the <c>WeightRecord</c> construction are both
+    /// done here via plain Java reflection, rather than as direct C# calls, deliberately
     /// following the same pattern as <see cref="CreateMassInKilograms"/> immediately below: this
     /// sidesteps needing to know/guess what the .NET binding generator actually calls the
     /// <c>Metadata</c> type (it lives in a Kotlin subpackage,
@@ -145,19 +149,43 @@ public static class HealthConnectWriter
     /// class/method names. The final result is cast back to the concrete, already-used
     /// <see cref="WeightRecord"/> type (not the untyped reflection result), so the rest of this
     /// method can use it exactly as before.
+    ///
+    /// A first attempt at this fix looked up every class here (including <c>WeightRecord</c>,
+    /// <c>Instant</c>, <c>ZoneOffset</c>, and <c>Mass</c>, all of which already have known,
+    /// working C# bindings) via <c>Java.Lang.Class.ForName(name)</c>. That built and ran, but
+    /// failed on a real device the very first time the write path was exercised, with the last
+    /// sync error containing nothing but the bare string
+    /// <c>androidx.health.connect.client.records.metadata.Metadata</c> and no other text - the
+    /// signature of a JVM <c>ClassNotFoundException</c> (whose message is just the class name),
+    /// not the null-metadata bug this method was originally written to fix. Root cause:
+    /// <c>Class.forName(String)</c>'s single-argument overload resolves the class against
+    /// whatever <c>ClassLoader</c> the calling Java stack frame belongs to - but this call
+    /// doesn't have a normal Java caller, it's invoked via JNI from managed/Mono code, so that
+    /// implicit classloader resolution is not reliable and can miss classes that only exist in
+    /// the app's Maven-resolved dependency dex (as opposed to the platform/bootstrap classloader).
+    /// Fixed by loading <c>Metadata</c> through the <c>ClassLoader</c> that actually, successfully
+    /// loaded <see cref="WeightRecord"/> instead (obtained via the ordinary, reliable
+    /// <c>Java.Lang.Class.FromType(typeof(WeightRecord))</c>, since that's already a real, known
+    /// C# binding) - both classes come from the same library/dex, so its classloader is
+    /// guaranteed to already have access to <c>Metadata</c> too. The other three classes
+    /// (<c>Instant</c>, <c>ZoneOffset</c>, <c>Mass</c>) are resolved the same reliable way, via
+    /// their own known C# bound types, rather than by name at all - only <c>Metadata</c> genuinely
+    /// needs a by-name lookup, since it has no confirmed C# binding to call <c>FromType</c> on.
     /// </summary>
     private static WeightRecord CreateWeightRecord(Java.Time.Instant instant, Mass weight)
     {
-        using var metadataClass = Java.Lang.Class.ForName(MetadataJavaClassName);
+        using var weightRecordClass = Java.Lang.Class.FromType(typeof(WeightRecord));
+        using var instantClass = Java.Lang.Class.FromType(typeof(Java.Time.Instant));
+        using var zoneOffsetClass = Java.Lang.Class.FromType(typeof(Java.Time.ZoneOffset));
+        using var massClass = Java.Lang.Class.FromType(typeof(Mass));
+
+        using var classLoader = weightRecordClass.ClassLoader!;
+        using var metadataClass = classLoader.LoadClass(MetadataJavaClassName)!;
         // manualEntry() is @JvmOverloads with a single optional `device` parameter, so the JVM
         // also exposes a genuine zero-argument overload - no need to pass a null Device through.
         using var manualEntryMethod = metadataClass.GetMethod("manualEntry");
         using var metadata = manualEntryMethod.Invoke(null);
 
-        using var weightRecordClass = Java.Lang.Class.ForName(WeightRecordJavaClassName);
-        using var instantClass = Java.Lang.Class.ForName(InstantJavaClassName);
-        using var zoneOffsetClass = Java.Lang.Class.ForName(ZoneOffsetJavaClassName);
-        using var massClass = Java.Lang.Class.ForName(MassJavaClassName);
         using var constructor = weightRecordClass.GetConstructor(instantClass, zoneOffsetClass, massClass, metadataClass);
         var result = constructor.NewInstance(instant, null, weight, metadata);
         return (WeightRecord)result!;
