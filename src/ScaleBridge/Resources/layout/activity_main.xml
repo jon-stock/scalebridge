@@ -214,6 +214,37 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- Pending syncs card - hidden unless PendingSyncStore has readings that were captured
+             but failed to write to Health Connect and haven't been retried successfully yet. -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardPendingSync"
+            style="@style/ScaleBridge.SectionCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone">
+            <LinearLayout
+                android:orientation="vertical"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+                <TextView
+                    style="@style/ScaleBridge.SectionTitle"
+                    android:text="PENDING SYNCS"
+                    android:textColor="@color/brand_error" />
+                <TextView
+                    android:id="@+id/tvPendingSync"
+                    style="@style/ScaleBridge.BodyText"
+                    android:text=""
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnRetryPending"
+                    style="@style/ScaleBridge.Button"
+                    android:text="Retry now"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
         <!-- Last sync -->
         <com.google.android.material.card.MaterialCardView
             style="@style/ScaleBridge.SectionCard"

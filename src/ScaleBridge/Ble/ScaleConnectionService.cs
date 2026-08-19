@@ -115,9 +115,14 @@ public class ScaleConnectionService : Service
                 // this actually being a fatal, unhandled crash.
                 CrashLog.Record(this, ex);
 
+                // Don't just lose this reading because one sync attempt failed - persist it so
+                // MainActivity can show it and let the user retry the write later without
+                // needing to step back on the scale to capture the same weight again.
+                PendingSyncStore.Add(this, weightKg, whenUtc);
+
                 string shortDetail = $"{ex.GetType().Name}: {ex.Message}";
                 StatusStore.RecordError(this, $"{shortDetail} (see \"Last crash\" for full details)", DateTimeOffset.UtcNow);
-                SyncNotifier.PostError(this, $"Captured {weightKg:0.0} kg but Health Connect write failed: {shortDetail}");
+                SyncNotifier.PostError(this, $"Captured {weightKg:0.0} kg but Health Connect write failed: {shortDetail}. Saved - retry from the app.");
             }
             finally
             {

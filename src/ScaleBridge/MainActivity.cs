@@ -52,6 +52,9 @@ public class MainActivity : ComponentActivity
     private EditText _etName = null!;
     private View _cardLastCrash = null!;
     private TextView _tvLastCrash = null!;
+    private View _cardPendingSync = null!;
+    private TextView _tvPendingSync = null!;
+    private Button _btnRetryPending = null!;
 
     private ScanCallback? _debugScanCallback;
     private readonly Dictionary<string, string> _seenDevices = new();
@@ -99,6 +102,11 @@ public class MainActivity : ComponentActivity
             CrashLog.Clear(this);
             RefreshStatus();
         };
+
+        _cardPendingSync = FindViewById<View>(Resource.Id.cardPendingSync)!;
+        _tvPendingSync = FindViewById<TextView>(Resource.Id.tvPendingSync)!;
+        _btnRetryPending = FindViewById<Button>(Resource.Id.btnRetryPending)!;
+        _btnRetryPending.Click += (_, _) => RetryPendingSyncsAsync();
 
         _deviceListAdapter = new ArrayAdapter<string>(this, Resource.Layout.list_item_device, Resource.Id.tvDeviceRow, new List<string>());
         _lvDevices.Adapter = _deviceListAdapter;
@@ -158,6 +166,18 @@ public class MainActivity : ComponentActivity
 
         _tvHealthConnectPermissionStatus.Text = _lastHealthConnectPermissionResult ?? "Not requested yet in this session.";
 
+        var pending = PendingSyncStore.GetAll(this);
+        if (pending.Count > 0)
+        {
+            _cardPendingSync.Visibility = ViewStates.Visible;
+            _tvPendingSync.Text = string.Join("\n", pending.Select(p =>
+                $"{p.WeightKg:0.0} kg - {p.WhenUtc.ToLocalTime():dd MMM yyyy HH:mm}"));
+        }
+        else
+        {
+            _cardPendingSync.Visibility = ViewStates.Gone;
+        }
+
         var lastSync = StatusStore.LastSyncUtc(this);
         var lastWeight = StatusStore.LastWeightKg(this);
         var lastError = StatusStore.LastError(this);
@@ -175,6 +195,55 @@ public class MainActivity : ComponentActivity
         {
             _tvLastSync.Text = "No sync yet.";
         }
+    }
+
+    /// <summary>
+    /// Retries every reading in <see cref="PendingSyncStore"/> (captured from the scale but not
+    /// yet successfully written to Health Connect - see <see cref="Ble.ScaleConnectionService"/>)
+    /// directly from the UI, on the caller's (main) thread inside an <see langword="async"/>
+    /// method - unlike <see cref="Ble.ScaleConnectionService"/>, which deliberately runs the same
+    /// call via <see cref="Task.Run"/> because it has no UI thread of its own to safely block.
+    /// A reading is only removed from the pending store once it has actually, successfully been
+    /// written - anything that fails again is left in place for the next retry.
+    /// </summary>
+    private async void RetryPendingSyncsAsync()
+    {
+        var pending = PendingSyncStore.GetAll(this);
+        if (pending.Count == 0)
+            return;
+
+        _btnRetryPending.Enabled = false;
+        int succeeded = 0;
+        int stillFailing = 0;
+        try
+        {
+            foreach (var entry in pending)
+            {
+                try
+                {
+                    await HealthConnectWriter.WriteWeightAsync(this, entry.WeightKg, entry.WhenUtc);
+                    PendingSyncStore.Remove(this, entry.WhenUtc);
+                    StatusStore.RecordSuccess(this, entry.WeightKg, entry.WhenUtc);
+                    succeeded++;
+                }
+                catch (Exception ex)
+                {
+                    CrashLog.Record(this, ex);
+                    stillFailing++;
+                }
+            }
+        }
+        finally
+        {
+            _btnRetryPending.Enabled = true;
+        }
+
+        Toast.MakeText(this,
+            stillFailing == 0
+                ? $"Synced {succeeded} pending reading(s)."
+                : $"Synced {succeeded} pending reading(s); {stillFailing} still failing - see \"Last crash\" for details.",
+            ToastLength.Long)!.Show();
+        RefreshStatus();
     }
 
     // ---- Step 1: permissions ----------------------------------------------------------------
