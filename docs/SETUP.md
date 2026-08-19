@@ -15,11 +15,33 @@ build-apk.yml` builds it instead on a GitHub-hosted runner, unaffected by that p
 `main` (or trigger it manually from the repo's **Actions** tab), then download the signed
 `ScaleBridge-apk` artifact from the finished run. See the repo's Actions tab for build status.
 
-Note: that workflow currently signs every build with a **fresh throwaway keystore generated on
-each run**, purely so it works out of the box. That means every new build must be installed over
-an uninstalled previous copy (Android refuses to install an update signed by a different key).
-Switch to one persisted keystore stored as a repo secret before relying on this for real,
-in-place updates.
+Note: until the one-time setup below is done, that workflow signs every build with a **fresh
+throwaway keystore generated on each run**, purely so it works out of the box. That means every
+new build must be installed over an *uninstalled* previous copy - Android silently refuses to
+install an update signed by a different key, which is easy to not notice and looks exactly like "I
+installed the new build but the fix didn't work" when it's actually still running the old one.
+
+### One-time setup: a persisted signing keystore (do this once)
+
+So every future build can be installed as a normal in-place update instead:
+
+1. In this repo's **Actions** tab, manually run the **"Generate persistent signing keystore (run
+   once)"** workflow (`.github/workflows/generate-keystore.yml`) - it only needs running once,
+   ever.
+2. Once it finishes, download its `scalebridge-keystore-base64` artifact and open the
+   `scalebridge.keystore.base64.txt` file inside it.
+3. In this repo's **Settings -> Secrets and variables -> Actions**, add a **New repository
+   secret** named exactly `ANDROID_KEYSTORE_BASE64`, and paste that file's entire contents as the
+   value.
+4. From then on, `build-apk.yml` automatically detects and uses that secret instead of generating
+   a throwaway keystore - every build after this point is signed with the same key, so installing
+   a new build over an existing install works exactly like any other app update (no uninstall
+   needed). If you ever see the workflow log warn `ANDROID_KEYSTORE_BASE64 repo secret is not
+   set`, this step wasn't completed (or the secret name doesn't match exactly).
+
+The keystore/key passwords and alias this generates are deliberately plain, fixed values (see the
+workflow file) - only the keystore *file itself* needs to be kept as a secret, since it can't be
+regenerated if lost, unlike a password you chose yourself.
 
 ## Prerequisites (if building locally instead)
 

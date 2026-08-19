@@ -21,21 +21,29 @@ jobs:
       - name: Restore Android workload
         run: dotnet workload restore src/ScaleBridge/ScaleBridge.csproj
 
-      - name: Generate a throwaway signing keystore
-        # For real, repeated installs on the same phone you must reuse one keystore (Android
-        # refuses to install an update signed by a different key over an existing app) - see
-        # docs/SETUP.md. This step generates a fresh one every run, which is fine while you're
-        # still iterating and reinstalling from scratch, but swap in a persisted keystore
-        # (stored as a repo secret) before relying on this for real updates.
+      - name: Prepare signing keystore
+        # Prefers a persisted keystore stored in the ANDROID_KEYSTORE_BASE64 repo secret (set up
+        # once via the "Generate persistent signing keystore" workflow - see docs/SETUP.md), so
+        # every build is signed with the same key and installs cleanly as an update over the
+        # previous one. Falls back to generating a fresh throwaway keystore, purely so this
+        # workflow still works out of the box before that one-time setup is done - but every build
+        # signed that way requires uninstalling the previous copy first (Android refuses to
+        # install an update signed by a different key), which is easy to do by accident and looks
+        # like "the fix didn't work" when it's actually just testing a stale install.
         shell: pwsh
         run: |
-          $jdk = & dotnet --list-sdks | Out-Null
-          keytool -genkeypair -v `
-            -keystore scalebridge.keystore `
-            -alias scalebridge `
-            -keyalg RSA -keysize 2048 -validity 10000 `
-            -storepass "scalebridge-test" -keypass "scalebridge-test" `
-            -dname "CN=ScaleBridge Test, OU=Test, O=Test, L=Test, S=Test, C=GB"
+          $encoded = "${{ secrets.ANDROID_KEYSTORE_BASE64 }}"
+          if ([string]::IsNullOrWhiteSpace($encoded)) {
+            Write-Warning "ANDROID_KEYSTORE_BASE64 repo secret is not set - generating a THROWAWAY keystore for this run only. Uninstall any previous ScaleBridge install before installing this build, or set up a persisted keystore (see docs/SETUP.md) to avoid this every time."
+            keytool -genkeypair -v `
+              -keystore scalebridge.keystore `
+              -alias scalebridge `
+              -keyalg RSA -keysize 2048 -validity 10000 `
+              -storepass "scalebridge-test" -keypass "scalebridge-test" `
+              -dname "CN=ScaleBridge Test, OU=Test, O=Test, L=Test, S=Test, C=GB"
+          } else {
+            [IO.File]::WriteAllBytes("scalebridge.keystore", [Convert]::FromBase64String($encoded))
+          }
 
       - name: Publish signed Release APK
         run: >
