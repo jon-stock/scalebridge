@@ -596,3 +596,52 @@ This is now the third fix attempt for this write path, each one only discoverabl
 running on the real device - if a fourth error appears, it should at least now come with a full
 stack trace (per the previous section's diagnostics work) pointing at exactly which
 `LoadClass`/`GetMethod`/`GetConstructor`/`NewInstance` call failed and why.
+
+## Crash: `startForegroundService() not allowed due to mAllowStartForeground false`
+
+A real-device crash, unrelated to Health Connect - this one is `ScaleScanReceiver.OnReceive`
+crashing the whole process with:
+
+```
+Java.Lang.IllegalStateException: startForegroundService() not allowed due to
+mAllowStartForeground false: service uk.co.accessuk.scalebridge/.Ble.ScaleConnectionService
+ ---> android.app.ForegroundServiceStartNotAllowedException: ...
+```
+
+This is a genuine, well-documented Android OS policy restriction (Android 12+, "foreground
+service launch restrictions" - this app's `targetSdkVersion` is 34), not a binding/naming bug like
+the three Health Connect issues above, and not something a manifest permission or
+`foregroundServiceType` declaration can override. `ScaleScanReceiver` is woken by an *implicit
+broadcast* delivered via the mutable `PendingIntent` registered in `ScaleScanRegistrar` through
+`BluetoothLeScanner.startScan(filters, settings, pendingIntent)`. That kind of broadcast is not one
+of the OS's specially-exempted types (unlike, say, `BOOT_COMPLETED`), so it does not automatically
+grant the temporary "this component may start a foreground service" exemption - if the app has had
+no recent foreground/visible activity when the scale's advertisement is seen (precisely the
+"reacts with no user interaction" scenario this receiver exists for), the OS can and does refuse
+the `StartForegroundService(...)` call outright, and - since nothing caught it - the resulting
+exception took the whole process down.
+
+Fixed immediately, defensively, in `ScaleScanReceiver.OnReceive`: the `StartForegroundService` call
+is now wrapped in a try/catch. On failure it no longer crashes - it logs the full exception via
+`CrashLog.Record` (surfaced in "Last crash"), records a short reason via `StatusStore.RecordError`
+("Last sync error"), and posts a plain notification via `SyncNotifier.PostError` telling the user
+to open the app to sync manually this time. Posting a notification is not itself subject to this
+restriction (only *starting a foreground service* is gated), so this fallback is reliable. There is
+deliberately no retry loop: this is a deterministic app-state gate, not a transient failure, so
+retrying immediately would just fail identically.
+
+This is a safety net, not a real fix for the underlying reliability goal (Prompt.md Section 4,
+"no user interaction required after setup") - it just turns "app silently crashes" into "app
+degrades to a manual-open notification", which can still happen fairly often on a phone that's
+been idle for a while. The actual Google-documented, purpose-built solution for "wake a
+background-restricted app to start a foreground service when a companion BLE device comes into
+range" is `android.companion.CompanionDeviceManager`'s background device-presence observation API
+(`startObservingDevicePresence`/the older device-presence broadcast, API 26+/33+ depending on the
+exact method), combined with the special
+`android.permission.REQUEST_COMPANION_START_FOREGROUND_SERVICES_FROM_BACKGROUND` permission it
+lets an associated app request - CDM-associated companion apps are specifically exempted from this
+restriction, because this exact use case (fitness trackers, watches, scales) is what CDM was built
+for. That's a real architecture change (one-time CDM association during setup, replacing or
+supplementing the current `BluetoothLeScanner.startScan` + `PendingIntent` + `ScaleScanReceiver`
+wake path) rather than a one-line fix, and hasn't been implemented yet - this section's fix is the
+stop-the-crashing safety net while that decision is made.
