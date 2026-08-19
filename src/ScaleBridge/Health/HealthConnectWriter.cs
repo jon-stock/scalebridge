@@ -28,6 +28,11 @@ public static class HealthConnectWriter
 
     public const string WriteWeightPermission = "android.permission.health.WRITE_WEIGHT";
     private const string PermissionControllerJavaClassName = "androidx.health.connect.client.PermissionController";
+    private const string WeightRecordJavaClassName = "androidx.health.connect.client.records.WeightRecord";
+    private const string MetadataJavaClassName = "androidx.health.connect.client.records.metadata.Metadata";
+    private const string InstantJavaClassName = "java.time.Instant";
+    private const string ZoneOffsetJavaClassName = "java.time.ZoneOffset";
+    private const string MassJavaClassName = "androidx.health.connect.client.units.Mass";
 
     public static bool IsAvailable(Context context)
     {
@@ -92,7 +97,7 @@ public static class HealthConnectWriter
 
             var instant = Java.Time.Instant.OfEpochMilli(whenUtc.ToUnixTimeMilliseconds());
             var weight = CreateMassInKilograms(weightKg);
-            var record = new WeightRecord(instant, null, weight, null);
+            var record = CreateWeightRecord(instant, weight);
 
             // Kotlin's `Record` is a sealed interface; the .NET binding exposes it as `IRecord`,
             // not a `Record` class/type - confirmed against a real build.
@@ -105,6 +110,57 @@ public static class HealthConnectWriter
             client.InsertRecords(records, bridge);
             bridge.AwaitResult(CallTimeout);
         });
+    }
+
+    /// <summary>
+    /// Builds the <see cref="WeightRecord"/> to insert, given an already-constructed
+    /// <c>Instant</c> and <see cref="Mass"/>.
+    ///
+    /// This previously called <c>new WeightRecord(instant, null, weight, null)</c> directly, which
+    /// compiled fine but crashed at runtime with "parameter specified as non-null is null: method
+    /// androidx.health.connect.client.records.WeightRecord.&lt;init&gt;": the real Kotlin
+    /// constructor's 4th parameter (<c>metadata: Metadata</c>) only has a default value
+    /// (<c>Metadata.EMPTY</c>) for callers going through Kotlin itself - a direct JVM constructor
+    /// call (which is what a bound C# `new WeightRecord(...)` compiles down to) has no such
+    /// default and requires a real, non-null <c>Metadata</c> instance. (The 2nd parameter,
+    /// <c>zoneOffset</c>, is genuinely nullable in the real API, so passing <see langword="null"/>
+    /// for that one is correct and not the cause of this error.)
+    ///
+    /// Confirmed against the real AndroidX Kotlin source
+    /// (androidx.health.connect.client.records.metadata.Metadata.kt) that <c>Metadata</c>'s
+    /// constructor is <c>internal</c> - it can only be built via one of its companion's
+    /// <c>@JvmStatic</c> factory functions, of which <c>manualEntry()</c> (an
+    /// <c>@JvmOverloads</c> function whose zero-argument overload defaults its optional
+    /// <c>device</c> parameter to <see langword="null"/>) is the correct one for a manually
+    /// captured scale reading like this app's.
+    ///
+    /// Both the <c>Metadata.manualEntry()</c> call and the entire <c>WeightRecord</c> construction
+    /// are done here via plain Java reflection, rather than as direct C# calls, deliberately
+    /// following the same pattern as <see cref="CreateMassInKilograms"/> immediately below: this
+    /// sidesteps needing to know/guess what the .NET binding generator actually calls the
+    /// <c>Metadata</c> type (it lives in a Kotlin subpackage,
+    /// <c>androidx.health.connect.client.records.metadata</c>, that this file has no existing
+    /// `using` for, and this project has repeatedly hit binding-generator naming surprises - see
+    /// docs/PROTOCOL_CONFIRMATION.md) and instead depends only on the real, source-confirmed JVM
+    /// class/method names. The final result is cast back to the concrete, already-used
+    /// <see cref="WeightRecord"/> type (not the untyped reflection result), so the rest of this
+    /// method can use it exactly as before.
+    /// </summary>
+    private static WeightRecord CreateWeightRecord(Java.Time.Instant instant, Mass weight)
+    {
+        using var metadataClass = Java.Lang.Class.ForName(MetadataJavaClassName);
+        // manualEntry() is @JvmOverloads with a single optional `device` parameter, so the JVM
+        // also exposes a genuine zero-argument overload - no need to pass a null Device through.
+        using var manualEntryMethod = metadataClass.GetMethod("manualEntry");
+        using var metadata = manualEntryMethod.Invoke(null);
+
+        using var weightRecordClass = Java.Lang.Class.ForName(WeightRecordJavaClassName);
+        using var instantClass = Java.Lang.Class.ForName(InstantJavaClassName);
+        using var zoneOffsetClass = Java.Lang.Class.ForName(ZoneOffsetJavaClassName);
+        using var massClass = Java.Lang.Class.ForName(MassJavaClassName);
+        using var constructor = weightRecordClass.GetConstructor(instantClass, zoneOffsetClass, massClass, metadataClass);
+        var result = constructor.NewInstance(instant, null, weight, metadata);
+        return (WeightRecord)result!;
     }
 
     /// <summary>

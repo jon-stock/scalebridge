@@ -439,3 +439,40 @@ working two fixes ago).
 Fixed with `[Register("...")]` on all three classes - the standard, documented mechanism for
 forcing a class's generated Java name to match a specific hand-written value, letting a manifest
 entry like `.Ble.ScaleScanReceiver` correctly resolve to the intended C# type.
+
+## Crash writing to Health Connect: "parameter specified as non-null is null" in WeightRecord
+
+The Health Connect write path (flagged above as "compiling, but functionally unverified") was
+exercised for the first time and immediately threw:
+
+```
+parameter specified as non-null is null: method androidx.health.connect.client.records.WeightRecord.<init>
+```
+
+Root cause: `HealthConnectWriter.WriteWeightAsync` built the record with
+`new WeightRecord(instant, null, weight, null)`. The real Kotlin constructor's 4th parameter
+(`metadata: Metadata`) has a default value (`Metadata.EMPTY`), but that default only applies to
+callers going through the Kotlin compiler - a direct JVM constructor call (which is what the bound
+C# `new WeightRecord(...)` compiles down to) has no such default and requires a real, non-null
+`Metadata` instance, which nothing in this codebase had ever constructed. (The 2nd parameter,
+`zoneOffset`, is also `null` here, but that one is genuinely nullable in the real API, so it isn't
+implicated.)
+
+Confirmed against the real AndroidX Kotlin source
+(`androidx.health.connect.client.records.metadata.Metadata.kt`) that `Metadata`'s constructor is
+`internal` - a caller can only obtain one via the companion's `@JvmStatic` factory functions, of
+which `manualEntry()` (defaulting its optional `device` parameter to `null` via `@JvmOverloads`)
+is the correct choice for a manually captured scale reading.
+
+Fixed in `CreateWeightRecord` (`HealthConnectWriter.cs`): both the `Metadata.manualEntry()` call
+and the `WeightRecord` construction itself are now done via plain Java reflection, rather than a
+direct C# constructor call, for the same reason as `CreateMassInKilograms` a few lines below it -
+`Metadata` lives in a Kotlin subpackage (`androidx.health.connect.client.records.metadata`) this
+file has no existing `using` for, and this project has repeatedly hit binding-generator naming
+surprises (see `Mass.Kilograms` above), so reflection avoids needing to guess what the .NET
+binding actually calls that type. The reflection result is cast back to the concrete, already-used
+`WeightRecord` type, so the rest of `WriteWeightAsync` is unchanged.
+
+This fix has not yet been re-verified against a real Health Connect instance on a device; per this
+document's ongoing pattern, if a *different* null/type error appears next, the newly-added
+`CreateWeightRecord` is the first place to look.
