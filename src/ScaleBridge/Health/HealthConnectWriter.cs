@@ -45,7 +45,46 @@ public static class HealthConnectWriter
         // HealthConnectClient.getSdkStatus(...) returns SDK_AVAILABLE (3) once Health Connect is
         // installed/available for this app, whether built into the OS (Android 14+) or provided
         // by the separate Health Connect app (Android 9-13) - Prompt.md Section 5.
+        //
+        // NOTE: this only confirms Health Connect itself is installed/available - it says nothing
+        // about whether *this app* currently holds WRITE_WEIGHT permission. Use
+        // HasWritePermissionAsync for that; conflating the two previously meant the app had no way
+        // to detect a mid-session permission revocation (e.g. an OEM battery manager silently
+        // pulling the grant back) short of an actual write failing.
         return HealthConnectClient.GetSdkStatus(context) == HealthConnectClient.SdkAvailable;
+    }
+
+    /// <summary>
+    /// Checks Health Connect's *actual current* grant for <see cref="WriteWeightPermission"/>,
+    /// via <c>PermissionController.getGrantedPermissions()</c> - not the one-off, session-scoped
+    /// result of the last in-app permission request (which is all MainActivity previously showed,
+    /// and which goes stale the instant the app process restarts or the OS silently revokes the
+    /// grant in the background). This is what actually answers "is Health Connect still connected
+    /// right now", which is the real, live status the main screen needs.
+    ///
+    /// Confirmed from the real, pinned `connect-client:1.1.0-alpha07` sources
+    /// (`PermissionController.kt`): `getGrantedPermissions()` is a suspend fun instance member of
+    /// `PermissionController`, reached via `HealthConnectClient.permissionController` (a plain
+    /// `val` property) - bridged the same way as `InsertRecords` in
+    /// <see cref="WriteWeightAsync"/>, via <see cref="KotlinContinuationBridge{TResult}"/>. Unlike
+    /// every call already exercised on a real device in this file, this specific call has not yet
+    /// been - callers should treat a thrown exception here defensively (see MainActivity's usage),
+    /// same as every other not-yet-device-verified Health Connect call in this project (see
+    /// docs/PROTOCOL_CONFIRMATION.md).
+    /// </summary>
+    public static async Task<bool> HasWritePermissionAsync(Context context)
+    {
+        if (!IsAvailable(context))
+            return false;
+
+        return await Task.Run(() =>
+        {
+            var client = HealthConnectClient.GetOrCreate(context);
+            var bridge = new KotlinContinuationBridge<Java.Lang.Object>();
+            client.PermissionController!.GetGrantedPermissions(bridge);
+            var result = bridge.AwaitResult(CallTimeout);
+            return result is Java.Util.ISet set && set.Contains(new Java.Lang.String(WriteWeightPermission));
+        });
     }
 
     /// <summary>

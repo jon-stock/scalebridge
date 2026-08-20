@@ -6,8 +6,18 @@
          a single hardcoded light value with no night-mode variants - the mismatch produced
          invisible white-on-white text in input fields on a phone with dark mode enabled. Forcing
          Light avoids the whole light/dark mismatch class of bugs for this small, single-purpose
-         screen rather than trying to properly support both. -->
-    <style name="AppTheme" parent="Theme.MaterialComponents.Light.NoActionBar">
+         screen rather than trying to properly support both.
+
+         Deliberately *not* ".NoActionBar": MainActivity.OnCreateOptionsMenu/OnOptionsItemSelected
+         inflate an overflow menu ("Show/hide setup", "Diagnostics") that both existed in code and
+         were assumed to be reachable from the moment they were added, but with no ActionBar/
+         Toolbar anywhere for the framework to host them, the inflated menu had nowhere to draw
+         its 3-dot icon and was completely unreachable in the running app - not a rendering
+         glitch, a missing menu-hosting surface. Keeping the plain system ActionBar (rather than
+         adding a Toolbar view + switching MainActivity to AppCompatActivity) is the minimal fix:
+         MainActivity's existing OnCreateOptionsMenu/OnOptionsItemSelected already assumed a real
+         ActionBar/overflow existed and need no further changes to work correctly with one. -->
+    <style name="AppTheme" parent="Theme.MaterialComponents.Light">
         <item name="colorPrimary">@color/brand_primary</item>
         <item name="colorPrimaryDark">@color/brand_primary_dark</item>
         <item name="colorAccent">@color/brand_accent</item>

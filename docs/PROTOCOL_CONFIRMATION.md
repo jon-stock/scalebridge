@@ -867,3 +867,53 @@ for. That's a real architecture change (one-time CDM association during setup, r
 supplementing the current `BluetoothLeScanner.startScan` + `PendingIntent` + `ScaleScanReceiver`
 wake path) rather than a one-line fix, and hasn't been implemented yet - this section's fix is the
 stop-the-crashing safety net while that decision is made.
+
+## Missing overflow menu, and a live Health Connect permission status
+
+Two related usability reports: the "Diagnostics"/"Show-hide setup" overflow menu (added to
+`OnCreateOptionsMenu`/`OnOptionsItemSelected` back when "Last crash"/"Last error" were moved off
+the main screen) turned out not to exist at all in the running app, and separately, Health Connect
+write permission was found revoked only a day after being granted, with nothing in the app
+surfacing that until a write actually failed.
+
+**No overflow menu**: root cause was `AppTheme` (`styles.xml`) extending
+`Theme.MaterialComponents.Light.NoActionBar`, with no `Toolbar` anywhere in `activity_main.xml`
+and `MainActivity` extending plain `ComponentActivity` (needed for `RegisterForActivityResult`,
+not `AppCompatActivity`). `OnCreateOptionsMenu` genuinely ran and inflated the menu without error,
+but with no ActionBar/Toolbar to host it, there was nowhere for Android to draw the 3-dot icon -
+the menu items were unreachable, not hidden. Fixed by dropping `.NoActionBar` from `AppTheme`'s
+parent, restoring the plain system ActionBar `OnCreateOptionsMenu`/`OnOptionsItemSelected` already
+assumed existed; no Toolbar view or `AppCompatActivity` switch needed.
+
+**Permissions revoked after ~1 day, with no visible status**: the app never re-checked Health
+Connect's actual granted-permission state after the initial request - `MainActivity`'s status text
+only ever showed the outcome of the *last in-app permission request*, held in a plain in-memory
+field that reset to "Not requested yet in this session" on every process restart and otherwise
+never updated again, so it could not detect (or show) a later revocation at all. Separately,
+Android's runtime permission auto-reset (and, more relevant on a background-only app like this
+one, various OEM battery managers' more aggressive "unused app" heuristics) can revoke a runtime-
+style grant like `WRITE_WEIGHT` far sooner than stock AOSP's multi-month default if the app's
+foreground Activity is never opened - exactly this app's normal usage pattern, since it's designed
+to run unattended via `ScaleScanReceiver`/`ScaleConnectionService`.
+
+Fixed by adding `HealthConnectWriter.HasWritePermissionAsync` (`PermissionController.
+getGrantedPermissions()`, reached via `HealthConnectClient.PermissionController`), confirmed
+against the real, pinned `connect-client:1.1.0-alpha07` sources
+(`PermissionController.kt`: a plain suspend fun instance member, bridged the same way as
+`InsertRecords`), and calling it from `MainActivity.RefreshStatus()` on every app open and
+auto-refresh tick so the status text reflects Health Connect's actual current grant rather than a
+stale one-off request result. `ScaleConnectionService.OnWeightCaptured`'s failure handling also
+now recognises a bare `Java.Lang.SecurityException` specifically (what a revoked grant surfaces as
+at write time) and calls it out by name in the notification/`StatusStore` error text, instead of
+the ex.GetType().Name`/`ex.Message` in an unhelpful format used for every other error, only detail
+readable by opening "Last crash".
+
+This is genuinely new binding surface for `getGrantedPermissions()` specifically (unlike
+`insertRecords`, which has been confirmed working end-to-end on a real device) - not yet exercised
+against a real Health Connect instance. `RefreshHealthConnectPermissionStatusAsync` in
+`MainActivity.cs` is wrapped defensively (catches and logs via `CrashLog`, degrading to a "couldn't
+check" status message) for exactly this reason - consistent with this document's established
+pattern for every other not-yet-device-verified call in this file. If it throws on first real use,
+per this document's "download and read the real generated binding" lesson, the
+`health-connect-binding-dump` CI artifact is the first place to check `PermissionController`'s
+actual generated C# member name/signature before guessing at a fix.

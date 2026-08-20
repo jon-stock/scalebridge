@@ -78,7 +78,11 @@ public class MainActivity : ComponentActivity
     private ArrayAdapter<string>? _deviceListAdapter;
 
     private ActivityResultLauncher? _healthPermissionLauncher;
-    private string? _lastHealthConnectPermissionResult;
+
+    // Guards RefreshHealthConnectPermissionStatusAsync against overlapping runs: RefreshStatus()
+    // (and therefore this) fires on every ~3s auto-refresh tick while the screen is open, and a
+    // suspend-fun round trip to Health Connect can easily take longer than that on a slow device.
+    private bool _permissionCheckInFlight;
 
     // Polls RefreshStatus() while the screen is visible, so the History list (including any
     // newly-pending entry) reflects background activity (a scale-triggered sync running via
@@ -271,9 +275,54 @@ public class MainActivity : ComponentActivity
             $"Bluetooth/notification permissions granted: {(hasPermissions ? "yes" : "no")}\n" +
             $"Health Connect available: {(healthConnectAvailable ? "yes" : "no")}";
 
-        _tvHealthConnectPermissionStatus.Text = _lastHealthConnectPermissionResult ?? "Not requested yet in this session.";
+        RefreshHealthConnectPermissionStatusAsync(healthConnectAvailable);
 
         RefreshHistory();
+    }
+
+    /// <summary>
+    /// Shows Health Connect's actual, current WRITE_WEIGHT grant - not just the outcome of the
+    /// last in-app permission request, which used to be all this text showed (and which reset to
+    /// "Not requested yet in this session" on every app restart, even if the permission had
+    /// previously been granted and was still perfectly valid - or, just as misleadingly, kept
+    /// showing "Granted" from a past session after the OS had since silently revoked it). Runs on
+    /// every <see cref="RefreshStatus"/> call (app open + each ~3s auto-refresh tick while
+    /// visible), so a mid-session revocation becomes visible without the user needing to trigger a
+    /// new sync first and notice it failed.
+    ///
+    /// <see cref="HealthConnectWriter.HasWritePermissionAsync"/> is genuinely new, not-yet-device-
+    /// verified binding surface (see its own doc comment) - wrapped defensively here so a binding
+    /// mismatch shows an honest "couldn't check" message instead of crashing the screen or
+    /// spamming Diagnostics on every refresh tick.
+    /// </summary>
+    private async void RefreshHealthConnectPermissionStatusAsync(bool healthConnectAvailable)
+    {
+        if (!healthConnectAvailable)
+        {
+            _tvHealthConnectPermissionStatus.Text = "Health Connect is not installed/available on this device.";
+            return;
+        }
+
+        if (_permissionCheckInFlight)
+            return;
+
+        _permissionCheckInFlight = true;
+        try
+        {
+            bool granted = await HealthConnectWriter.HasWritePermissionAsync(this);
+            _tvHealthConnectPermissionStatus.Text = granted
+                ? "Connected - Health Connect write permission is currently granted."
+                : "Not connected - permission isn't currently granted. Tap \"Health Connect write access\" above to re-grant it.";
+        }
+        catch (Exception ex)
+        {
+            CrashLog.Record(this, ex);
+            _tvHealthConnectPermissionStatus.Text = "Couldn't check Health Connect permission status - see Diagnostics (menu) for details.";
+        }
+        finally
+        {
+            _permissionCheckInFlight = false;
+        }
     }
 
     /// <summary>
@@ -424,7 +473,7 @@ public class MainActivity : ComponentActivity
     internal void OnHealthConnectPermissionResult(Java.Lang.Object? result)
     {
         bool granted = HealthConnectWriter.GrantedSetIncludesWritePermission(result);
-        _lastHealthConnectPermissionResult = granted
+        string message = granted
             ? "Granted - Health Connect writes are allowed."
             : "Not granted. Open the button again, or grant it from Health Connect's own app settings.";
 
@@ -435,9 +484,11 @@ public class MainActivity : ComponentActivity
             // dialog stays up until dismissed, so the full text is always readable.
             new AlertDialog.Builder(this)!
                 .SetTitle("Health Connect permission")!
-                .SetMessage(_lastHealthConnectPermissionResult)!
+                .SetMessage(message)!
                 .SetPositiveButton("OK", (EventHandler<DialogClickEventArgs>?)null)!
                 .Show();
+            // Re-check live status (rather than trusting this one-off result directly) so the
+            // status text always reflects the same source of truth RefreshStatus uses elsewhere.
             RefreshStatus();
         });
     }

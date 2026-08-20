@@ -122,9 +122,23 @@ public class ScaleConnectionService : Service
                 // same weight again.
                 WeightHistoryStore.RecordPending(this, weightKg, whenUtc);
 
-                string shortDetail = $"{ex.GetType().Name}: {ex.Message}";
+                // A revoked WRITE_WEIGHT grant surfaces here as a bare Java SecurityException
+                // with no other indication of what went wrong - the same "confusing raw exception
+                // text" pattern seen with ClassNotFoundException earlier (see
+                // docs/PROTOCOL_CONFIRMATION.md). Calling it out by name specifically is worth
+                // doing here since it's an actionable, user-fixable state (re-grant the
+                // permission), unlike most other failures in this catch block.
+                bool permissionRevoked = ex is Java.Lang.SecurityException
+                    || (ex.InnerException is Java.Lang.SecurityException);
+
+                string shortDetail = permissionRevoked
+                    ? "Health Connect write permission was revoked"
+                    : $"{ex.GetType().Name}: {ex.Message}";
                 StatusStore.RecordError(this, $"{shortDetail} (see \"Last crash\" for full details)", DateTimeOffset.UtcNow);
-                SyncNotifier.PostError(this, $"Captured {weightKg:0.0} kg but Health Connect write failed: {shortDetail}. Saved - retry from the app.");
+                SyncNotifier.PostError(this,
+                    permissionRevoked
+                        ? $"Captured {weightKg:0.0} kg but Health Connect write permission was revoked. Open ScaleBridge and re-grant it, then retry from the app."
+                        : $"Captured {weightKg:0.0} kg but Health Connect write failed: {shortDetail}. Saved - retry from the app.");
             }
             finally
             {
