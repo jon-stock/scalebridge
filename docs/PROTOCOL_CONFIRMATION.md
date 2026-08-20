@@ -881,9 +881,33 @@ surfacing that until a write actually failed.
 and `MainActivity` extending plain `ComponentActivity` (needed for `RegisterForActivityResult`,
 not `AppCompatActivity`). `OnCreateOptionsMenu` genuinely ran and inflated the menu without error,
 but with no ActionBar/Toolbar to host it, there was nowhere for Android to draw the 3-dot icon -
-the menu items were unreachable, not hidden. Fixed by dropping `.NoActionBar` from `AppTheme`'s
-parent, restoring the plain system ActionBar `OnCreateOptionsMenu`/`OnOptionsItemSelected` already
-assumed existed; no Toolbar view or `AppCompatActivity` switch needed.
+the menu items were unreachable, not hidden.
+
+First fix attempt just dropped `.NoActionBar` from `AppTheme`'s parent
+(`Theme.MaterialComponents.Light`), on the theory that would restore a plain native ActionBar for
+the existing `OnCreateOptionsMenu`/`OnOptionsItemSelected` code to host its overflow items on. That
+built and installed cleanly, but a real device test showed **no visible change at all** - not even
+a blank/empty title bar appearing. Root cause of *that*: every AppCompat-family theme
+(`Theme.AppCompat.*`, and `Theme.MaterialComponents.*` right along with it, being AppCompat-derived)
+unconditionally sets `android:windowActionBar` to `false` and disables the native framework
+ActionBar entirely - regardless of whether `.NoActionBar` is in the theme's name or not. That name
+suffix only controls a separate, AppCompat-internal "should a *support* action bar be created for
+you automatically" flag, and that flag itself only does anything if the hosting Activity is an
+`AppCompatActivity` - which `MainActivity` was not. So there was no mechanism left in the theme to
+draw *any* action bar either way; the specific fix attempted was simply targeting a flag with no
+remaining effect once the app was already on a Material/AppCompat theme.
+
+Fixed properly, the standard documented way: kept `.NoActionBar` (explicitly suppressing
+AppCompat's own automatic action bar, since a custom one is hosted instead), added a real
+`<androidx.appcompat.widget.Toolbar>` to `activity_main.xml` (as a sibling above the existing
+`ScrollView`, both now inside an outer vertical `LinearLayout`), switched `MainActivity` to extend
+`AndroidX.AppCompat.App.AppCompatActivity`, and called `SetSupportActionBar(toolbar)` in
+`OnCreate`. `RegisterForActivityResult` (the original reason `ComponentActivity` was used) still
+works unchanged - `AppCompatActivity` inherits it from AndroidX's own `ComponentActivity` further
+up its chain via `FragmentActivity`, so nothing else had to be given up to fix this correctly. The
+toolbar's title is explicitly hidden (`SupportActionBar.SetDisplayShowTitleEnabled(false)`) since
+the existing in-content header card already shows "ScaleBridge" - showing it twice would look like
+a mistake.
 
 **Permissions revoked after ~1 day, with no visible status**: the app never re-checked Health
 Connect's actual granted-permission state after the initial request - `MainActivity`'s status text

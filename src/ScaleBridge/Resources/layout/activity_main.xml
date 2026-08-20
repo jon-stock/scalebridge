@@ -1,10 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Root is a Toolbar (hosting the overflow menu - see MainActivity.OnCreate's
+     SetSupportActionBar call and styles.xml's AppTheme comment for why a plain ActionBar can't
+     be used here) above the original ScrollView content, rather than the ScrollView itself. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:orientation="vertical"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@color/brand_background"
-    android:fillViewport="true">
+    android:layout_height="match_parent">
+
+    <androidx.appcompat.widget.Toolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:background="@color/brand_primary"
+        app:popupTheme="@style/ThemeOverlay.AppCompat.Light"
+        app:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/brand_background"
+        android:fillViewport="true">
 
     <LinearLayout
         android:orientation="vertical"
@@ -259,4 +276,5 @@
         </com.google.android.material.card.MaterialCardView>
 
     </LinearLayout>
-</ScrollView>
+    </ScrollView>
+</LinearLayout>

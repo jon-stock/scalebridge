@@ -7,6 +7,7 @@ using Android.Views;
 using Android.Widget;
 using AndroidX.Activity;
 using AndroidX.Activity.Result;
+using AndroidX.AppCompat.App;
 using ScaleBridge.Ble;
 using ScaleBridge.Health;
 using ScaleBridge.Permissions;
@@ -22,9 +23,13 @@ namespace ScaleBridge;
 /// <see cref="Ble.ScaleConnectionService"/> - this Activity is not needed again unless the user
 /// wants to check status or re-run setup.
 ///
-/// Extends AndroidX's <see cref="ComponentActivity"/> (rather than the plain framework
-/// <c>Activity</c>) specifically to get <c>RegisterForActivityResult</c>, needed for the Health
-/// Connect permission flow below.
+/// Extends AndroidX's <see cref="AppCompatActivity"/> (rather than the plain framework
+/// <c>Activity</c>), which is required for two independent reasons: <c>RegisterForActivityResult</c>
+/// (needed for the Health Connect permission flow below - AppCompatActivity still provides this,
+/// via AndroidX's own <c>ComponentActivity</c> further up its inheritance chain through
+/// <c>FragmentActivity</c>), and <c>SetSupportActionBar</c> (needed to host the overflow menu via
+/// the <c>Toolbar</c> in activity_main.xml - see styles.xml's AppTheme comment for why a plain
+/// ActionBar/plain ComponentActivity combination can't show one at all under this Material theme).
 ///
 /// The two extra intent-filters below are a documented Health Connect requirement (confirmed
 /// against Google's own Health Connect sample app manifest), not something optional: without an
@@ -38,7 +43,7 @@ namespace ScaleBridge;
 [Activity(Label = "ScaleBridge", MainLauncher = true, LaunchMode = Android.Content.PM.LaunchMode.SingleTop)]
 [IntentFilter(new[] { "androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" })]
 [IntentFilter(new[] { "android.intent.action.VIEW_PERMISSION_USAGE" }, Categories = new[] { "android.intent.category.HEALTH_PERMISSIONS" })]
-public class MainActivity : ComponentActivity
+public class MainActivity : AppCompatActivity
 {
     private const int RequestCodeAndroidPermissions = 1001;
     private const long DebugScanDurationMs = 15_000;
@@ -115,6 +120,17 @@ public class MainActivity : ComponentActivity
         }
 
         SetContentView(Resource.Layout.activity_main);
+
+        // Required for the overflow menu ("Show/hide setup", "Diagnostics") to actually be
+        // reachable at all - see styles.xml's AppTheme comment for the full explanation of why a
+        // Toolbar + AppCompatActivity + this call are all needed together, and why simply
+        // removing ".NoActionBar" from the theme (an earlier, insufficient fix attempt) had no
+        // visible effect whatsoever. Title is suppressed since the header card further down
+        // already shows "ScaleBridge" - showing it twice (once here, once there) would look like
+        // a mistake rather than intentional.
+        var toolbar = FindViewById<AndroidX.AppCompat.Widget.Toolbar>(Resource.Id.toolbar)!;
+        SetSupportActionBar(toolbar);
+        SupportActionBar?.SetDisplayShowTitleEnabled(false);
 
         _tvStatus = FindViewById<TextView>(Resource.Id.tvStatus)!;
         _tvScanEmpty = FindViewById<TextView>(Resource.Id.tvScanEmpty)!;

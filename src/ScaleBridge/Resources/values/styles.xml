@@ -8,16 +8,32 @@
          Light avoids the whole light/dark mismatch class of bugs for this small, single-purpose
          screen rather than trying to properly support both.
 
-         Deliberately *not* ".NoActionBar": MainActivity.OnCreateOptionsMenu/OnOptionsItemSelected
-         inflate an overflow menu ("Show/hide setup", "Diagnostics") that both existed in code and
-         were assumed to be reachable from the moment they were added, but with no ActionBar/
-         Toolbar anywhere for the framework to host them, the inflated menu had nowhere to draw
-         its 3-dot icon and was completely unreachable in the running app - not a rendering
-         glitch, a missing menu-hosting surface. Keeping the plain system ActionBar (rather than
-         adding a Toolbar view + switching MainActivity to AppCompatActivity) is the minimal fix:
-         MainActivity's existing OnCreateOptionsMenu/OnOptionsItemSelected already assumed a real
-         ActionBar/overflow existed and need no further changes to work correctly with one. -->
-    <style name="AppTheme" parent="Theme.MaterialComponents.Light">
+         Back to ".NoActionBar" deliberately, alongside a real <androidx.appcompat.widget.Toolbar>
+         in activity_main.xml + MainActivity now extending AppCompatActivity + SetSupportActionBar
+         in code (see MainActivity.OnCreate) - this is the only combination that reliably shows an
+         overflow menu under any AppCompat/MaterialComponents theme.
+         An earlier fix attempt here just dropped ".NoActionBar" (parent="Theme.MaterialComponents.
+         Light") on the theory that would restore a plain native ActionBar for OnCreateOptionsMenu/
+         OnOptionsItemSelected to host their overflow items on. That compiled and installed fine
+         but produced *no visible change whatsoever* - confirmed after a real device test. Root
+         cause: every AppCompat-family theme (Theme.AppCompat.*, and therefore
+         Theme.MaterialComponents.* too, since it's AppCompat-derived) unconditionally sets
+         android:windowActionBar to false and disables the native framework ActionBar entirely,
+         regardless of whether ".NoActionBar" is in the theme name or not - that suffix only
+         controls a *different*, AppCompat-internal "should a support action bar be created for
+         you automatically" flag, which itself only has any effect if the hosting Activity is an
+         AppCompatActivity. Since MainActivity was (and had to remain, for RegisterForActivityResult)
+         a plain framework/AndroidX ComponentActivity - not AppCompatActivity - there was no
+         mechanism left in the theme at all to draw *any* action bar, with or without
+         ".NoActionBar". The only correct way to get a working overflow menu under a Material
+         theme is the standard, documented one: keep ".NoActionBar" (suppress AppCompat's own
+         automatic action bar, since we're hosting our own Toolbar instead), declare a real
+         Toolbar widget in the layout, and explicitly call SetSupportActionBar(toolbar) - which
+         does require the owning Activity to be AppCompatActivity (see MainActivity.cs; confirmed
+         AndroidX.AppCompat.App.AppCompatActivity still supports RegisterForActivityResult, since
+         it inherits from AndroidX's own ComponentActivity via FragmentActivity, so no other
+         functionality had to be given up to fix this properly). -->
+    <style name="AppTheme" parent="Theme.MaterialComponents.Light.NoActionBar">
         <item name="colorPrimary">@color/brand_primary</item>
         <item name="colorPrimaryDark">@color/brand_primary_dark</item>
         <item name="colorAccent">@color/brand_accent</item>
