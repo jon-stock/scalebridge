@@ -237,7 +237,7 @@ public class MainActivity : AppCompatActivity
                 ? $"Last error ({StatusStore.LastErrorUtc(this)?.ToLocalTime():g}):\n\n{lastError}"
                 : "No crashes or errors recorded.";
 
-        var builder = new AlertDialog.Builder(this)!
+        var builder = new Android.App.AlertDialog.Builder(this)!
             .SetTitle("Diagnostics")!
             .SetMessage(message)!
             .SetPositiveButton("OK", (EventHandler<DialogClickEventArgs>?)null)!;
@@ -498,7 +498,7 @@ public class MainActivity : AppCompatActivity
             // A Toast is the wrong tool here: it disappears on its own after a few seconds and
             // this message is too long to reliably read (or even see in full) in that time. A
             // dialog stays up until dismissed, so the full text is always readable.
-            new AlertDialog.Builder(this)!
+            new Android.App.AlertDialog.Builder(this)!
                 .SetTitle("Health Connect permission")!
                 .SetMessage(message)!
                 .SetPositiveButton("OK", (EventHandler<DialogClickEventArgs>?)null)!
