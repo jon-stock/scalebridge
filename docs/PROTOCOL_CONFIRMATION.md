@@ -937,7 +937,16 @@ This is genuinely new binding surface for `getGrantedPermissions()` specifically
 against a real Health Connect instance. `RefreshHealthConnectPermissionStatusAsync` in
 `MainActivity.cs` is wrapped defensively (catches and logs via `CrashLog`, degrading to a "couldn't
 check" status message) for exactly this reason - consistent with this document's established
-pattern for every other not-yet-device-verified call in this file. If it throws on first real use,
-per this document's "download and read the real generated binding" lesson, the
-`health-connect-binding-dump` CI artifact is the first place to check `PermissionController`'s
-actual generated C# member name/signature before guessing at a fix.
+pattern for every other not-yet-device-verified call in this file.
+
+**Confirmed against the real `health-connect-binding-dump` CI artifact** (from the build that
+shipped this fix) rather than left as an assumption: `IHealthConnectClient.PermissionController`
+is a real, directly-callable property returning `IPermissionController`, and
+`IPermissionController.GetGrantedPermissions(IContinuation)` is a real, directly-callable instance
+method matching exactly what `HasWritePermissionAsync` calls - no reflection or further binding
+gap here, unlike several of the earlier `WriteWeightAsync` fixes. Still only compile-time
+confirmed, not yet exercised end-to-end on a real device/real Health Connect instance - if it
+throws there for some other reason (e.g. an actual runtime permission/IPC issue rather than a
+binding mismatch), the defensive wrapper in `MainActivity.cs` degrades to the "couldn't check"
+message rather than crashing, but the underlying cause would still need `CrashLog`/"Last crash" to
+diagnose.
