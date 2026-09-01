@@ -950,3 +950,62 @@ throws there for some other reason (e.g. an actual runtime permission/IPC issue 
 binding mismatch), the defensive wrapper in `MainActivity.cs` degrades to the "couldn't check"
 message rather than crashing, but the underlying cause would still need `CrashLog`/"Last crash" to
 diagnose.
+
+## Scale suddenly stopped connecting after working for a week; two real gaps found, root cause still unconfirmed
+
+Reported symptom: the scale had synced reliably for about a week, then stopped connecting
+entirely - no weight ever captured, so nothing ever reaches the Health Connect write step at all.
+The user described the only error shown as "Health Connect connection refused", including with
+the app open on screen at the time. That exact phrase does not appear anywhere in this codebase
+(grepped the whole `src/` tree) - none of `ScaleConnectionService`, `QnScaleSession`, or
+`ScaleScanReceiver`'s error text says "Health Connect" in a connection-failure context (Health
+Connect is only ever mentioned in the *write* step, which happens after a weight is captured - a
+step this failure never reaches). So either this is the user's own shorthand for "the sync/scale
+connection failed, no useful detail shown", or it's a real, currently-uncaptured message this
+document doesn't yet have visibility into. **Not yet root-caused** - the fixes below address two
+genuine gaps found while investigating, either of which could plausibly explain "stopped
+connecting, reopening the app doesn't help, no real error shown", but neither has been confirmed
+as *the* cause on the affected device.
+
+**Gap 1 - a real GATT connection failure was previously invisible everywhere.**
+`QnScaleSession.OnConnectionStateChange` treated every `ProfileState.Disconnected` transition
+identically - `Log.Info` only, no `Failed` event, nothing surfaced to `CrashLog`/`StatusStore`/a
+notification - regardless of whether it followed a real connection or was itself a failed
+*connection attempt* (e.g. GATT status 133 "GATT_ERROR", a well-known Android BLE stack bug
+usually fixed by toggling Bluetooth off/on or rebooting the phone; status 8 "connection timeout";
+or the scale itself refusing/terminating the attempt). A connection refusal from the scale
+genuinely could not have left any trace in this app before this fix - consistent with "the only
+error" being vague/absent. Fixed by tracking whether the session had ever actually reached
+`Connected` before a given `Disconnected` transition (already-present `_isConnected` field); if
+not, and `status != GattStatus.Success`, it's now raised as a real `Failed` event (surfaced the
+same way as every other connection failure: `CrashLog`, `StatusStore.RecordError`,
+`SyncNotifier.PostError`) instead of a silent `Log.Info`. If this recurs, the actual GATT status
+code will now be visible in "Last crash"/the sync-failed notification - critical missing
+information this document doesn't have for the report that prompted this fix.
+
+**Gap 2 - re-opening the app did not, and could not, recover a dropped background scan
+registration.** `ScaleScanRegistrar.Register` (the call that arms the OS-level, `PendingIntent`-
+backed BLE scan filter `ScaleScanReceiver` depends on) was previously only ever invoked from
+`MainActivity.SaveConfigurationAndArmScan` (initial setup) and `Boot.BootCompletedReceiver` (after
+a full phone restart) - never from `OnResume`/`OnCreate`. If the OS ever silently cancels that
+registration mid-session - plausible causes include Bluetooth being toggled off and back on, an
+OEM battery manager force-stopping the app (the same general class of aggressive background-app
+management already confirmed, in the section above, to revoke the Health Connect permission
+mid-session on this same app), or a Bluetooth stack crash/reset - there was previously no way to
+recover short of re-entering the MAC address and tapping "Save" again, even though nothing about
+the actual configuration had changed. This exactly matches "tried with the app open, still doesn't
+connect": merely opening/viewing the main screen did nothing to re-arm the scan. Fixed by calling
+`ScaleScanRegistrar.Register` from `MainActivity.OnResume` (`RearmScaleScanIfConfigured`) every
+time the app is opened - `Register` already explicitly stops any previous registration before
+re-starting, so this is a safe, idempotent self-heal, not a real config change - and surfacing the
+result (`"Scale scan armed: yes/no - <reason>"`) in the main status text, so a registration failure
+(Bluetooth off, missing permission, or the OS refusing the scan request outright) is visible
+immediately on open instead of only manifesting as "it just doesn't connect".
+
+**Still needed to actually confirm the root cause**: the exact verbatim error text from this
+device (via the now-reachable Diagnostics menu item or `crash_log.txt`), and/or a fresh
+`ScaleBridge.Qn`/`ScaleBridge.Service` logcat capture from the next failed connection attempt,
+following this document's established "get the real text/log before guessing further" discipline.
+Both fixes above are worth keeping regardless of what that turns out to show (neither is a
+guess-and-hope patch - both close a real, confirmed gap in what the app can detect and report), but
+whichever of the two actually explains this specific report is still unconfirmed.

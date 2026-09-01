@@ -89,6 +89,13 @@ public class MainActivity : AppCompatActivity
     // suspend-fun round trip to Health Connect can easily take longer than that on a slow device.
     private bool _permissionCheckInFlight;
 
+    // Set by RearmScaleScanIfConfigured (OnResume only, not every auto-refresh tick - re-arming
+    // the scan repeatedly every 3s would be pointless churn) and shown in RefreshStatus, so a
+    // silently-cancelled background scan registration (see RearmScaleScanIfConfigured's own doc
+    // comment) is visible from the main screen instead of leaving "won't connect to the scale,
+    // no error anywhere" as the only symptom.
+    private ScaleScanRegistrar.RegisterResult? _lastScanRegisterResult;
+
     // Polls RefreshStatus() while the screen is visible, so the History list (including any
     // newly-pending entry) reflects background activity (a scale-triggered sync running via
     // ScaleScanReceiver + ScaleConnectionService) without the user needing to close and reopen
@@ -257,8 +264,39 @@ public class MainActivity : AppCompatActivity
     protected override void OnResume()
     {
         base.OnResume();
+        RearmScaleScanIfConfigured();
         RefreshStatus();
         ScheduleAutoRefresh();
+    }
+
+    /// <summary>
+    /// Re-registers the background BLE scan filter every time the app is opened, not just at
+    /// initial setup or after a reboot. <see cref="ScaleScanRegistrar.Register"/> was previously
+    /// only ever called from <see cref="SaveConfigurationAndArmScan"/> (initial setup) and
+    /// <see cref="Boot.BootCompletedReceiver"/> (after a full phone restart) - there was no way to
+    /// recover if the OS ever silently cancelled the registered <c>PendingIntent</c>-backed scan
+    /// mid-session (e.g. Bluetooth toggled off and back on, an OEM battery manager force-stopping
+    /// the app - the same class of aggressive background-app management already confirmed to
+    /// revoke the Health Connect permission mid-session, see
+    /// docs/PROTOCOL_CONFIRMATION.md - or a Bluetooth stack crash/reset), short of re-entering the
+    /// MAC address and tapping "Save" again even though nothing about the configuration itself
+    /// had changed. This previously meant simply opening the app to check on things did nothing
+    /// to fix a silently-dropped scan registration, which looked exactly like "no error anywhere,
+    /// it just doesn't connect any more".
+    ///
+    /// <see cref="ScaleScanRegistrar.Register"/> is safe to call repeatedly - it explicitly stops
+    /// any previous registration before re-starting - so doing this on every resume is a cheap,
+    /// idempotent self-heal, not a real configuration change.
+    /// </summary>
+    private void RearmScaleScanIfConfigured()
+    {
+        if (!ScaleConfig.IsConfigured(this))
+        {
+            _lastScanRegisterResult = null;
+            return;
+        }
+
+        _lastScanRegisterResult = ScaleScanRegistrar.Register(this);
     }
 
     protected override void OnPause()
@@ -286,8 +324,20 @@ public class MainActivity : AppCompatActivity
         bool hasPermissions = PermissionHelper.HasAllRequiredAndroidPermissions(this);
         bool healthConnectAvailable = HealthConnectWriter.IsAvailable(this);
 
+        string scanArmedLine = _lastScanRegisterResult switch
+        {
+            null => "",
+            ScaleScanRegistrar.RegisterResult.Success => "Scale scan armed: yes\n",
+            ScaleScanRegistrar.RegisterResult.BluetoothUnavailable => "Scale scan armed: no - Bluetooth is off or unavailable.\n",
+            ScaleScanRegistrar.RegisterResult.MissingPermission => "Scale scan armed: no - Bluetooth permissions aren't granted.\n",
+            ScaleScanRegistrar.RegisterResult.ScanFailed => "Scale scan armed: no - the OS refused the scan request (try toggling Bluetooth off/on).\n",
+            ScaleScanRegistrar.RegisterResult.NotConfigured => "",
+            _ => "",
+        };
+
         _tvStatus.Text =
             $"Configured: {(configured ? "yes" : "no")}\n" +
+            scanArmedLine +
             $"Bluetooth/notification permissions granted: {(hasPermissions ? "yes" : "no")}\n" +
             $"Health Connect available: {(healthConnectAvailable ? "yes" : "no")}";
 

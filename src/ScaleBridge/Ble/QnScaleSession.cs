@@ -82,8 +82,30 @@ public sealed class QnScaleSession : BluetoothGattCallback
         }
         else if (newState == ProfileState.Disconnected)
         {
-            Log.Info(LogTag, $"GATT disconnected (status={status}).");
+            // Distinguish a genuine connection-attempt failure (never reached Connected at all)
+            // from an ordinary disconnect after a session that did connect - previously both were
+            // treated identically as an "informational, nothing to see here" event (Log.Info only,
+            // no Failed/error raised at all), so a real GATT connection refusal from the scale
+            // (e.g. status 133 "GATT_ERROR", a well-known Android BLE stack bug usually fixed by
+            // toggling Bluetooth off/on or rebooting the phone; 8 "connection timeout"; or the
+            // scale itself actively refusing/terminating the connection attempt) left literally no
+            // trace anywhere in the app - no notification, no "Last crash"/"Last error", nothing -
+            // making it undiagnosable from a user report alone. A graceful disconnect that follows
+            // a real connection (e.g. right after ScaleConnectionService finished and called
+            // Close()) is still just informational, since that's expected, not an error.
+            bool neverConnected = !_isConnected;
             _isConnected = false;
+
+            if (neverConnected && status != GattStatus.Success)
+            {
+                Log.Warn(LogTag, $"GATT connection attempt failed (status={status}).");
+                Failed?.Invoke($"Bluetooth connection to the scale failed (status={status}).");
+            }
+            else
+            {
+                Log.Info(LogTag, $"GATT disconnected (status={status}).");
+            }
+
             Disconnected?.Invoke();
         }
     }
