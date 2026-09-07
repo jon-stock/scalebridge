@@ -23,6 +23,18 @@ public sealed class QnScaleSession : BluetoothGattCallback
     private const int MaxStoredDataQueryAttempts = 10;
     private const long StoredDataRetryDelayMs = 5_000;
 
+    // Android's BLE stack frequently fails an initial connectGatt()/service-discovery attempt
+    // with a generic, non-actionable status (most commonly GATT_ERROR / status 133) for
+    // transient reasons - a stale GATT resource left over from a previous attempt, the device
+    // briefly out of range, or a radio/timing hiccup - that a fresh attempt shortly afterwards
+    // usually clears. Previously any such failure before a stable connection was ever reached
+    // was treated as a silent, non-error "disconnected" and the whole sync attempt was simply
+    // abandoned with no retry and no user-visible notification at all. MaxConnectAttempts
+    // includes the initial attempt; ConnectRetryDelaysMs holds the backoff before each retry
+    // (index 0 = delay before attempt 2, etc., with the last entry reused for any further retry).
+    private const int MaxConnectAttempts = 3;
+    private static readonly long[] ConnectRetryDelaysMs = { 1_000, 3_000 };
+
     public event Action<string>? StatusChanged;
     public event Action<double>? WeightCaptured;
     public event Action<string>? Failed;
@@ -49,14 +61,96 @@ public sealed class QnScaleSession : BluetoothGattCallback
     private int _historyQueryAttempts;
     private long _sessionStartedScaleSeconds;
 
+    // Connect-phase retry state (see MaxConnectAttempts/ConnectRetryDelaysMs above).
+    private Context? _connectContext;
+    private BluetoothDevice? _connectDevice;
+    private int _connectAttempts;
+    private bool _hasEverConnected;
+    private bool _closed;
+
     public void Connect(Context context, BluetoothDevice device)
     {
-        Log.Info(LogTag, $"Connecting to {device.Address}...");
-        _gatt = device.ConnectGatt(context, false, this, BluetoothTransports.Le);
+        _connectContext = context;
+        _connectDevice = device;
+        _connectAttempts = 0;
+        _hasEverConnected = false;
+        _closed = false;
+        AttemptConnect();
+    }
+
+    private void AttemptConnect()
+    {
+        if (_closed || _connectDevice is null)
+            return;
+
+        // Belt-and-braces: always release any previous GATT resource before creating a new one.
+        // A stale, not-fully-closed BluetoothGatt from a prior attempt reusing the same underlying
+        // connection slot is one of the most common real-world causes of status 133.
+        CleanupGattForRetry();
+
+        _connectAttempts++;
+        Log.Info(LogTag, $"Connecting to {_connectDevice.Address} (attempt {_connectAttempts}/{MaxConnectAttempts})...");
+        try
+        {
+            _gatt = _connectDevice.ConnectGatt(_connectContext, false, this, BluetoothTransports.Le);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(LogTag, $"connectGatt threw: {ex.Message}");
+            _gatt = null;
+        }
+
+        if (_gatt is null)
+            HandleConnectFailure("connectGatt returned null");
+    }
+
+    /// <summary>
+    /// Called for any failure before a connection has ever been fully established for the current
+    /// connect attempt (connectGatt returning null, a connect-time disconnect/status-133-style
+    /// failure, or a service-discovery failure). Retries with backoff up to
+    /// <see cref="MaxConnectAttempts"/> total attempts; only once that budget is exhausted is this
+    /// surfaced as a real failure via <see cref="Failed"/> (previously any single such failure was
+    /// silently swallowed with no retry and no user-visible notification).
+    /// </summary>
+    private void HandleConnectFailure(string reason)
+    {
+        if (_closed)
+            return;
+
+        _isConnected = false;
+        _hasEverConnected = false;
+        CleanupGattForRetry();
+
+        if (_connectAttempts < MaxConnectAttempts)
+        {
+            long delay = ConnectRetryDelaysMs[Math.Min(_connectAttempts - 1, ConnectRetryDelaysMs.Length - 1)];
+            Log.Warn(LogTag, $"Connect attempt {_connectAttempts}/{MaxConnectAttempts} failed ({reason}); retrying in {delay}ms.");
+            StatusChanged?.Invoke($"Connection attempt {_connectAttempts} failed, retrying...");
+            _mainHandler.PostDelayed(AttemptConnect, delay);
+        }
+        else
+        {
+            Log.Error(LogTag, $"Giving up after {_connectAttempts} connect attempts ({reason}).");
+            Failed?.Invoke($"Could not connect to the scale after {_connectAttempts} attempts ({reason}).");
+        }
+    }
+
+    private void CleanupGattForRetry()
+    {
+        try
+        {
+            _gatt?.Close();
+        }
+        catch (Java.Lang.Exception ex)
+        {
+            Log.Warn(LogTag, $"Error closing GATT before retry: {ex.Message}");
+        }
+        _gatt = null;
     }
 
     public void Close()
     {
+        _closed = true;
         _mainHandler.RemoveCallbacksAndMessages(null);
         try
         {
@@ -74,47 +168,48 @@ public sealed class QnScaleSession : BluetoothGattCallback
 
     public override void OnConnectionStateChange(BluetoothGatt? gatt, GattStatus status, ProfileState newState)
     {
+        if (_closed)
+            return;
+
         if (newState == ProfileState.Connected)
         {
             Log.Info(LogTag, "GATT connected; discovering services.");
             _isConnected = true;
+            _hasEverConnected = true;
+            _connectAttempts = 0;
             gatt?.DiscoverServices();
         }
         else if (newState == ProfileState.Disconnected)
         {
-            // Distinguish a genuine connection-attempt failure (never reached Connected at all)
-            // from an ordinary disconnect after a session that did connect - previously both were
-            // treated identically as an "informational, nothing to see here" event (Log.Info only,
-            // no Failed/error raised at all), so a real GATT connection refusal from the scale
-            // (e.g. status 133 "GATT_ERROR", a well-known Android BLE stack bug usually fixed by
-            // toggling Bluetooth off/on or rebooting the phone; 8 "connection timeout"; or the
-            // scale itself actively refusing/terminating the connection attempt) left literally no
-            // trace anywhere in the app - no notification, no "Last crash"/"Last error", nothing -
-            // making it undiagnosable from a user report alone. A graceful disconnect that follows
-            // a real connection (e.g. right after ScaleConnectionService finished and called
-            // Close()) is still just informational, since that's expected, not an error.
-            bool neverConnected = !_isConnected;
             _isConnected = false;
-
-            if (neverConnected && status != GattStatus.Success)
+            if (!_hasEverConnected)
             {
-                Log.Warn(LogTag, $"GATT connection attempt failed (status={status}).");
-                Failed?.Invoke($"Bluetooth connection to the scale failed (status={status}).");
+                // A disconnect before we ever reached the Connected state is a connect-time
+                // failure (e.g. the classic status-133 GATT_ERROR), not a normal end-of-session
+                // disconnect - retry rather than giving up immediately (see HandleConnectFailure;
+                // this also raises Failed - CrashLog/StatusStore/notification - once the retry
+                // budget is exhausted, rather than every single attempt being silent).
+                HandleConnectFailure($"status={status} ({(int)status})");
             }
             else
             {
                 Log.Info(LogTag, $"GATT disconnected (status={status}).");
+                Disconnected?.Invoke();
             }
-
-            Disconnected?.Invoke();
         }
     }
 
     public override void OnServicesDiscovered(BluetoothGatt? gatt, GattStatus status)
     {
+        if (_closed)
+            return;
+
         if (gatt is null || status != GattStatus.Success)
         {
-            Failed?.Invoke($"Service discovery failed (status={status}).");
+            // Also retried, for the same reasons as a connect-time failure above - a failed
+            // service discovery leaves the GATT connection unusable, so a fresh connectGatt is
+            // needed rather than just giving up.
+            HandleConnectFailure($"service discovery failed (status={status})");
             return;
         }
 

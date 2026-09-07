@@ -27,7 +27,13 @@ public class ScaleConnectionService : Service
 {
     public const string ExtraDeviceAddress = "device_address";
     private const string LogTag = "ScaleBridge.Service";
-    private const long OverallTimeoutMs = 45_000;
+
+    // Padded beyond a single connect attempt's worth of time to leave room for
+    // QnScaleSession's own connect-phase retries (see MaxConnectAttempts/ConnectRetryDelaysMs in
+    // QnScaleSession.cs) - a status-133-style failure that needs 1-2 retries should still have
+    // the full handshake/weight-capture window available afterwards, not be starved by a timeout
+    // budget sized only for a single successful attempt.
+    private const long OverallTimeoutMs = 60_000;
 
     private QnScaleSession? _session;
     private Handler? _timeoutHandler;
