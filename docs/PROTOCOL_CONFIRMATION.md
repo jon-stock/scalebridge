@@ -1009,3 +1009,73 @@ following this document's established "get the real text/log before guessing fur
 Both fixes above are worth keeping regardless of what that turns out to show (neither is a
 guess-and-hope patch - both close a real, confirmed gap in what the app can detect and report), but
 whichever of the two actually explains this specific report is still unconfirmed.
+
+## Status 133 GATT_ERROR: connect-phase retry, plus a wider pass for "silent failure" and "one bug crashes everything" gaps
+
+Reported symptom: "133 error, Bluetooth connection failed, nothing will sync now" - a genuine
+`GATT_ERROR`/status-133 connectGatt() failure, most commonly caused by a stale, not-yet-released
+GATT client resource from a previous attempt, the device briefly out of range, or a radio/timing
+hiccup - all normally transient and clearable by a fresh attempt, but this app had zero retry logic
+at the connect level at all: any single such failure aborted the whole sync attempt outright.
+
+**Fix**: `QnScaleSession.AttemptConnect`/`HandleConnectFailure` now retry a failed `connectGatt()`
+*or* a failed service-discovery call up to `MaxConnectAttempts` (3) total attempts, with backoff
+(`ConnectRetryDelaysMs`: 1s, then 3s), always releasing the previous `BluetoothGatt` via `Close()`
+before retrying - directly targeting the "stale GATT resource" root cause. Only once the retry
+budget is exhausted is it surfaced as a real `Failed` event. `ScaleConnectionService`'s overall
+timeout was padded 45s -> 60s to leave room for this without starving the actual handshake window.
+
+**A second, later report** ("connected to the scale this morning, but nothing synced, no History
+entry at all - just an unrelated Health Connect permission-check timeout in Diagnostics") prompted
+a wider pass, since the crash shown (from the periodic `HasWritePermissionAsync` UI poll, not from
+an actual weight write) turned out to be a red herring for what actually happened - the weight was
+never captured from the scale at all, and nothing in the app said so. That, plus the user
+explicitly asking to think ahead about the "works fine for days, then a *different* unhandled
+exception" pattern this project keeps hitting, found:
+
+- **Diagnostics unconditionally hid the real error.** `MainActivity.ShowDiagnosticsDialog` always
+  showed *only* `CrashLog`'s last crash whenever one existed at all, permanently hiding
+  `StatusStore`'s last sync error even if that error was more recent/relevant - exactly the trap in
+  this report, where an incidental, unrelated crash masked the real (silent) sync failure. Fixed to
+  show both, most-recent-first, and to let "Clear" clear both.
+- **The overall sync timeout was unconditionally silent.** `ScaleConnectionService`'s 60s timeout
+  always gave up with `isError: false` (no notification, no `StatusStore`/History trace at all) on
+  the assumption a timeout only ever means "wasn't stepped on" - indistinguishable from a real
+  stalled handshake (stuck partway through the vendor acknowledgement dance), which is exactly what
+  a "connected but nothing happened, no error anywhere" report looks like. Fixed via
+  `QnScaleSession.HasReceivedAnyVendorData`: no vendor traffic at all still stays silent (genuinely
+  just "wasn't stepped on"); any vendor traffic followed by a timeout is now a real, diagnosable
+  error.
+- **Every `BluetoothGattCallback` override ran with no exception handling above it at all.**
+  These run on a Binder thread pool thread with nothing else in the managed call stack; an
+  unexpected exception in any of them (a binding-generator surprise, an unusual real-device GATT
+  state, a parsing edge case not yet hit) previously propagated as a genuine unhandled exception -
+  caught by `ScaleBridgeApplication`'s global handler (so it wouldn't vanish entirely), but still
+  taking down the *whole app process* over what should only have been one failed sync attempt.
+  This is the most likely mechanical explanation for "works fine for days, then a different
+  unhandled exception": a background service exercising real-device BLE edge cases that simply
+  don't come up in day-to-day testing, with every single one of them escalating to a full app
+  crash. Every override (`OnConnectionStateChange`, `OnServicesDiscovered`,
+  `OnCharacteristicChanged`, and the queued-operation dispatch in `RunNext`, which covers the
+  descriptor/characteristic write callbacks too) now wraps its real logic in try/catch, converting
+  an unexpected failure into a contained, recorded `Failed` event instead of a process-ending crash.
+- **A malformed device address would have crashed the service outright.**
+  `BluetoothAdapter.GetRemoteDevice` throws `IllegalArgumentException` (not a null return) for a
+  bad MAC, and this call was unguarded in `ScaleConnectionService.OnStartCommand`. Wrapped the same
+  way, in case `ScaleConfig`'s stored address is ever corrupted.
+- **An abruptly-killed service could leak a `BluetoothGatt` client registration.** Nothing
+  previously guaranteed `QnScaleSession.Close()` ran if the OS killed `ScaleConnectionService`
+  directly (low memory, an OEM battery manager, etc.) rather than via its own normal
+  `StopSelfSafely` path. Android enforces a low per-app limit on concurrent GATT client
+  registrations; leaking one on every such kill is a plausible, purely resource-exhaustion
+  explanation for "worked fine for days, then stopped connecting at all" that would show no bug in
+  this app's own logic and would only clear via a Bluetooth toggle or reboot. Added
+  `ScaleConnectionService.OnDestroy` as an idempotent safety-net call to the same cleanup.
+
+**Not yet confirmed**: which (if any) of the last three findings explains a *specific* past crash
+on the affected device, since the exact crash text from those reports wasn't the same each time
+(different exceptions, per the user's own description) - consistent with them being genuinely
+distinct, previously-uncaught edge cases in the same unguarded surface, rather than one single
+repeating bug. Worth keeping regardless, same reasoning as always in this document: each closes a
+real, confirmed gap in what the app can detect/contain, independent of whether it turns out to be
+*the* cause of any one specific report.

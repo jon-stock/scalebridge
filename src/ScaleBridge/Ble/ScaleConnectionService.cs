@@ -55,7 +55,27 @@ public class ScaleConnectionService : Service
 
         var bluetoothManager = (BluetoothManager?)GetSystemService(BluetoothService);
         var adapter = bluetoothManager?.Adapter;
-        var device = adapter?.GetRemoteDevice(address);
+        BluetoothDevice? device = null;
+        try
+        {
+            device = adapter?.GetRemoteDevice(address);
+        }
+        catch (Java.Lang.Exception ex)
+        {
+            // GetRemoteDevice throws IllegalArgumentException for a malformed MAC address rather
+            // than returning null - previously uncaught here, which would crash the whole service
+            // (and, since this runs in the app's main process, the whole app) with an unhandled
+            // exception instead of the ordinary "can't sync this time" failure this really is.
+            // ScaleConfig only ever stores an address the user entered/picked from a real scan
+            // result, so this should not normally happen - but that also describes exactly the
+            // kind of "different unhandled exception after it having worked fine for days"
+            // reports this project has repeatedly seen turn out to have a genuine, previously
+            // uncaught cause (see docs/PROTOCOL_CONFIRMATION.md).
+            CrashLog.Record(this, ex);
+            FailAndStop($"Invalid scale Bluetooth address ({ex.GetType().Name}): {ex.Message}", isError: true);
+            return StartCommandResult.NotSticky;
+        }
+
         if (adapter is null || device is null)
         {
             FailAndStop("Bluetooth adapter unavailable.", isError: true);
@@ -73,8 +93,24 @@ public class ScaleConnectionService : Service
         _timeoutHandler = new Handler(Looper.MainLooper!);
         _timeoutHandler.PostDelayed(() =>
         {
-            if (!_finished)
-                FailAndStop("Timed out waiting for a stable weight reading (scale may not have been stepped on).", isError: false);
+            if (_finished)
+                return;
+
+            // Previously this always gave up completely silently (isError: false, no
+            // notification, no StatusStore/History trace at all) on the assumption that a
+            // timeout only ever means "the scale just wasn't stepped on" - but a real stalled
+            // handshake (e.g. stuck partway through the 0x14/0x21 acknowledgement dance) looks
+            // identical from here, and previously left literally zero evidence anywhere that a
+            // sync had even been attempted. HasReceivedAnyVendorData distinguishes the two: no
+            // vendor traffic at all really does just mean nobody stood on the scale (kept
+            // silent, as before); any vendor traffic followed by a timeout means the handshake
+            // itself got stuck, which is now surfaced as a real, diagnosable error.
+            bool handshakeStalled = _session?.HasReceivedAnyVendorData == true;
+            FailAndStop(
+                handshakeStalled
+                    ? "Connected to the scale and started the handshake, but timed out before a stable weight was produced."
+                    : "Timed out waiting for a stable weight reading (scale may not have been stepped on).",
+                isError: handshakeStalled);
         }, OverallTimeoutMs);
 
         return StartCommandResult.NotSticky;
@@ -190,6 +226,26 @@ public class ScaleConnectionService : Service
     {
         _session?.Close();
         _session = null;
+    }
+
+    /// <summary>
+    /// Safety net for every other teardown path in this class not having run first (e.g. the OS
+    /// killing this service directly - low memory, battery-manager force-stop, or any other
+    /// termination that does not go through <see cref="StopSelfSafely"/> first). Without this,
+    /// an abruptly-killed service could leave its <see cref="QnScaleSession"/>'s
+    /// <c>BluetoothGatt</c> connection registered with the Android Bluetooth stack indefinitely -
+    /// a real, cumulative resource leak (Android enforces a low per-app limit on concurrent GATT
+    /// client registrations) that would not show up as any particular bug in this app's own code,
+    /// but plausibly explains a background-scan device that "worked fine for days, then started
+    /// failing to connect at all" until Bluetooth was toggled or the phone rebooted. Calling
+    /// <see cref="Disconnect"/>/removing handler callbacks here is idempotent with every other
+    /// call site, so this is safe to run unconditionally.
+    /// </summary>
+    public override void OnDestroy()
+    {
+        _timeoutHandler?.RemoveCallbacksAndMessages(null);
+        Disconnect();
+        base.OnDestroy();
     }
 
     private void StopSelfSafely()

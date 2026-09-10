@@ -232,28 +232,51 @@ public class MainActivity : AppCompatActivity
     /// behind the overflow menu, now that the app is past its initial MVP stage and these are
     /// only relevant when something has actually gone wrong.
     /// </summary>
+    /// <summary>
+    /// Shows the last crash and/or the last sync error - previously this always showed *only*
+    /// the last crash whenever one existed at all, unconditionally hiding
+    /// <see cref="StatusStore"/>'s last error even if that error was more recent and more
+    /// relevant. That masking was directly observed in practice: a routine, unrelated background
+    /// crash (a transient timeout on the periodic Health Connect permission-status check, itself
+    /// harmless) permanently hid the real reason a scale sync had failed, because the crash -
+    /// however incidental - always "won". Both are now shown, most recent first, so whichever
+    /// actually happened last (and is therefore most likely to explain what the user just saw) is
+    /// what's read first, instead of silently disappearing behind whichever of the two happens to
+    /// be a "crash" versus a handled "error".
+    /// </summary>
     private void ShowDiagnosticsDialog()
     {
         var lastCrashUtc = CrashLog.LastCrashUtc(this);
         var lastCrashText = CrashLog.LastCrashText(this);
+        var lastErrorUtc = StatusStore.LastErrorUtc(this);
         var lastError = StatusStore.LastError(this);
 
-        string message = lastCrashText is not null
-            ? $"Last crash ({lastCrashUtc?.ToLocalTime():g}):\n\n{lastCrashText}"
-            : lastError is not null
-                ? $"Last error ({StatusStore.LastErrorUtc(this)?.ToLocalTime():g}):\n\n{lastError}"
-                : "No crashes or errors recorded.";
+        var sections = new List<(DateTimeOffset? When, string Label, string Text)>();
+        if (lastCrashText is not null)
+            sections.Add((lastCrashUtc, "Last crash", lastCrashText));
+        if (lastError is not null)
+            sections.Add((lastErrorUtc, "Last error", lastError));
+
+        // Most recent first; an entry with no timestamp (shouldn't normally happen, since both
+        // stores always write their timestamp key alongside the text) sorts last rather than
+        // crashing the comparison.
+        sections.Sort((a, b) => Nullable.Compare(b.When, a.When));
+
+        string message = sections.Count == 0
+            ? "No crashes or errors recorded."
+            : string.Join("\n\n----------\n\n", sections.Select(s => $"{s.Label} ({s.When?.ToLocalTime():g}):\n\n{s.Text}"));
 
         var builder = new Android.App.AlertDialog.Builder(this)!
             .SetTitle("Diagnostics")!
             .SetMessage(message)!
             .SetPositiveButton("OK", (EventHandler<DialogClickEventArgs>?)null)!;
 
-        if (lastCrashText is not null)
+        if (sections.Count > 0)
         {
             builder.SetNegativeButton("Clear", (_, _) =>
             {
                 CrashLog.Clear(this);
+                StatusStore.ClearError(this);
                 RefreshStatus();
             });
         }

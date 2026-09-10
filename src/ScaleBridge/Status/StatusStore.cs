@@ -53,6 +53,15 @@ public static class StatusStore
 
     public static string? LastError(Context context) => Prefs(context).GetString(KeyLastError, null);
 
+    /// <summary>Clears the last recorded error, mirroring <see cref="CrashLog.Clear"/> - used by MainActivity's Diagnostics "Clear" action, which now clears both.</summary>
+    public static void ClearError(Context context)
+    {
+        using var editor = Prefs(context).Edit()!;
+        editor.Remove(KeyLastError);
+        editor.Remove(KeyLastErrorUtcTicks);
+        editor.Apply();
+    }
+
     public static DateTimeOffset? LastErrorUtc(Context context)
     {
         long ticks = Prefs(context).GetLong(KeyLastErrorUtcTicks, 0);

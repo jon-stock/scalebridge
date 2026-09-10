@@ -2,6 +2,7 @@ using Android.Bluetooth;
 using Android.Content;
 using Android.OS;
 using Android.Util;
+using ScaleBridge.Status;
 
 namespace ScaleBridge.Ble;
 
@@ -166,7 +167,24 @@ public sealed class QnScaleSession : BluetoothGattCallback
 
     // ---- Connection lifecycle ---------------------------------------------------
 
+    // Every public BluetoothGattCallback override in this class is a thin try/catch wrapper
+    // around a "Core" method that does the real work - see HandleUnexpectedCallbackException's
+    // doc comment for why: these run on a Binder thread pool thread with nothing else above them
+    // in the managed call stack, so an unexpected exception here would otherwise take down the
+    // whole app process instead of just this one connection attempt.
     public override void OnConnectionStateChange(BluetoothGatt? gatt, GattStatus status, ProfileState newState)
+    {
+        try
+        {
+            OnConnectionStateChangeCore(gatt, status, newState);
+        }
+        catch (Exception ex)
+        {
+            HandleUnexpectedCallbackException(nameof(OnConnectionStateChange), ex);
+        }
+    }
+
+    private void OnConnectionStateChangeCore(BluetoothGatt? gatt, GattStatus status, ProfileState newState)
     {
         if (_closed)
             return;
@@ -200,6 +218,18 @@ public sealed class QnScaleSession : BluetoothGattCallback
     }
 
     public override void OnServicesDiscovered(BluetoothGatt? gatt, GattStatus status)
+    {
+        try
+        {
+            OnServicesDiscoveredCore(gatt, status);
+        }
+        catch (Exception ex)
+        {
+            HandleUnexpectedCallbackException(nameof(OnServicesDiscovered), ex);
+        }
+    }
+
+    private void OnServicesDiscoveredCore(BluetoothGatt? gatt, GattStatus status)
     {
         if (_closed)
             return;
@@ -255,6 +285,7 @@ public sealed class QnScaleSession : BluetoothGattCallback
         _weightScaleFactor = 100.0f;
         _seenProtocolType = 0;
         _hasReceivedProtocolType = false;
+        HasReceivedAnyVendorData = false;
         _historyQueryAttempts = 0;
         _sessionStartedScaleSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - QnFrameParser.ScaleUnixTimestampOffset;
         _mainHandler.RemoveCallbacksAndMessages(null);
@@ -327,7 +358,56 @@ public sealed class QnScaleSession : BluetoothGattCallback
 
         _opInFlight = true;
         var op = _opQueue.Dequeue();
-        op();
+
+        // Every queued GATT operation ultimately runs from inside a BluetoothGattCallback
+        // override, invoked on a Binder thread pool thread with no managed try/catch anywhere
+        // above it in the call stack - an unexpected exception here (a binding-generator
+        // surprise, an unusual real-device GATT state, or a bug not yet hit in this queue's more
+        // than a year of paths) would otherwise propagate as a genuine unhandled exception,
+        // taking down the entire app process rather than just failing this one sync attempt. See
+        // HandleUnexpectedCallbackException's own doc comment for the full rationale - this is
+        // one of several call sites across this class deliberately hardened against exactly the
+        // "worked fine for days, then a different unhandled exception" failure pattern.
+        try
+        {
+            op();
+        }
+        catch (Exception ex)
+        {
+            HandleUnexpectedCallbackException(nameof(RunNext), ex);
+        }
+    }
+
+    /// <summary>
+    /// Logs, best-effort records to <see cref="CrashLog"/>, and converts an unexpected exception
+    /// from inside any GATT callback into an ordinary, recoverable <see cref="Failed"/> event
+    /// instead of letting it propagate as a genuine unhandled exception. Every override below
+    /// runs on a Binder thread pool thread with no other managed exception handling above it in
+    /// the call stack - previously, any bug here (however rare) crashed the entire app process,
+    /// not just this one connection attempt. This is deliberately broad (catches
+    /// <see cref="Exception"/>, not just expected Java/Bluetooth exception types): the whole
+    /// point is to convert *unexpected* failures - the ones that, by definition, weren't
+    /// anticipated specifically enough to catch narrowly - into a diagnosable, contained failure
+    /// of just this sync attempt.
+    /// </summary>
+    private void HandleUnexpectedCallbackException(string where, Exception ex)
+    {
+        Log.Error(LogTag, $"Unexpected exception in {where}: {ex}");
+
+        if (_connectContext is not null)
+        {
+            try
+            {
+                CrashLog.Record(_connectContext, ex);
+            }
+            catch
+            {
+                // As in CrashLog.Record itself: never let crash-logging throw from inside a
+                // handler that is itself already recovering from an exception.
+            }
+        }
+
+        Failed?.Invoke($"Unexpected internal error ({where}): {ex.GetType().Name}: {ex.Message}");
     }
 
     public override void OnDescriptorWrite(BluetoothGatt? gatt, BluetoothGattDescriptor? descriptor, GattStatus status) => RunNext();
@@ -338,17 +418,40 @@ public sealed class QnScaleSession : BluetoothGattCallback
     // these, so this single override works unchanged on API 26 through 34+.
     public override void OnCharacteristicRead(BluetoothGatt? gatt, BluetoothGattCharacteristic? characteristic, GattStatus status)
     {
-        if (status == GattStatus.Success && characteristic is not null)
+        try
         {
-            var bytes = characteristic.GetValue();
-            if (bytes is not null)
-                Log.Debug(LogTag, $"Read {characteristic.Uuid}: {ToHex(bytes)} / \"{System.Text.Encoding.ASCII.GetString(bytes)}\"");
+            if (status == GattStatus.Success && characteristic is not null)
+            {
+                var bytes = characteristic.GetValue();
+                if (bytes is not null)
+                    Log.Debug(LogTag, $"Read {characteristic.Uuid}: {ToHex(bytes)} / \"{System.Text.Encoding.ASCII.GetString(bytes)}\"");
+            }
+        }
+        catch (Exception ex)
+        {
+            // Logged/recorded, but deliberately not re-thrown into RunNext's own try/catch below:
+            // these best-effort device-identification reads are diagnostic only (see
+            // OnServicesDiscoveredCore's comment above EnqueueRead) and must never abort the
+            // queue or raise Failed over a logging-only failure.
+            Log.Warn(LogTag, $"Non-fatal error handling characteristic read: {ex}");
         }
 
         RunNext();
     }
 
     public override void OnCharacteristicChanged(BluetoothGatt? gatt, BluetoothGattCharacteristic? characteristic)
+    {
+        try
+        {
+            OnCharacteristicChangedCore(characteristic);
+        }
+        catch (Exception ex)
+        {
+            HandleUnexpectedCallbackException(nameof(OnCharacteristicChanged), ex);
+        }
+    }
+
+    private void OnCharacteristicChangedCore(BluetoothGattCharacteristic? characteristic)
     {
         var data = characteristic?.GetValue();
         if (characteristic is null || data is null)
@@ -371,8 +474,20 @@ public sealed class QnScaleSession : BluetoothGattCallback
 
     // ---- Vendor protocol handling (ported from QNHandler.kt) --------------------------------
 
+    /// <summary>
+    /// True once at least one vendor notify frame has been received for this session - lets
+    /// <see cref="Ble.ScaleConnectionService"/>'s overall timeout tell "the scale was never
+    /// stepped on" (no vendor traffic at all - genuinely informational, not an error) apart from
+    /// "the handshake started but stalled before ever producing a stable weight" (real vendor
+    /// frames were seen, so this is worth surfacing as an actual, diagnosable error rather than
+    /// staying completely silent).
+    /// </summary>
+    public bool HasReceivedAnyVendorData { get; private set; }
+
     private void HandleVendorPacket(byte[] data)
     {
+        HasReceivedAnyVendorData = true;
+
         if (data.Length < 3)
             return;
 
