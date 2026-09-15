@@ -289,6 +289,15 @@ public sealed class QnScaleSession : BluetoothGattCallback
         _historyQueryAttempts = 0;
         _sessionStartedScaleSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - QnFrameParser.ScaleUnixTimestampOffset;
         _mainHandler.RemoveCallbacksAndMessages(null);
+
+        // Defensive: not currently reachable (this only runs once per successful service
+        // discovery, and nothing today re-enters service discovery on the same instance after
+        // ops have been queued), but the op queue is state tied to one specific GATT connection -
+        // leaving stale entries/an incorrectly-true _opInFlight around for a fresh session would
+        // reproduce the same "queue never advances" class of bug as RunGattOpOrAdvance guards
+        // against, just via a different path, if this class's connect/retry flow is ever changed.
+        _opQueue.Clear();
+        _opInFlight = false;
     }
 
     // ---- GATT op queue (only one outstanding GATT operation at a time is allowed) ----------
@@ -299,7 +308,9 @@ public sealed class QnScaleSession : BluetoothGattCallback
         if (characteristic is null)
             return;
 
-        Enqueue(() => _gatt?.ReadCharacteristic(characteristic));
+        Enqueue(() => RunGattOpOrAdvance(
+            () => _gatt?.ReadCharacteristic(characteristic) ?? false,
+            $"ReadCharacteristic({characteristic.Uuid})"));
     }
 
     private void EnqueueEnableNotify(BluetoothGattCharacteristic? characteristic, bool indicate)
@@ -323,7 +334,7 @@ public sealed class QnScaleSession : BluetoothGattCallback
                 ? BluetoothGattDescriptor.EnableIndicationValue
                 : BluetoothGattDescriptor.EnableNotificationValue;
             descriptor.SetValue(enableValue?.ToArray());
-            gatt.WriteDescriptor(descriptor);
+            RunGattOpOrAdvance(() => gatt.WriteDescriptor(descriptor), $"WriteDescriptor({characteristic.Uuid})");
         });
     }
 
@@ -337,8 +348,35 @@ public sealed class QnScaleSession : BluetoothGattCallback
         {
             characteristic.WriteType = GattWriteType.Default;
             characteristic.SetValue(payload);
-            gatt.WriteCharacteristic(characteristic);
+            RunGattOpOrAdvance(() => gatt.WriteCharacteristic(characteristic), $"WriteCharacteristic({characteristic.Uuid})");
         });
+    }
+
+    /// <summary>
+    /// Runs a GATT read/write/descriptor-write call and checks its return value. These Android
+    /// APIs return a <c>bool</c> indicating whether the operation was actually *accepted* by the
+    /// native Bluetooth stack - if the stack rejects it (busy, a transient timing hiccup, a stale
+    /// resource), it returns <c>false</c> and, critically, no completion callback
+    /// (<see cref="OnCharacteristicRead"/>/<see cref="OnCharacteristicWrite"/>/
+    /// <see cref="OnDescriptorWrite"/>) will ever arrive for it. Previously that return value was
+    /// ignored at every call site: <see cref="RunNext"/> had already marked an operation
+    /// in-flight, so a rejected call meant the queue would wait forever for a callback that was
+    /// never coming - silently stalling every subsequent queued operation (notification
+    /// subscriptions, unit/time configuration, handshake acknowledgements, stored-data queries)
+    /// for the rest of that connection, indistinguishable from the scale simply not being stepped
+    /// on. This is the same class of bug as the scan cooldown fix: state was being driven by
+    /// "the call was made" rather than "what actually happened". On a rejection we log it and
+    /// immediately advance the queue ourselves instead of waiting for a callback that will never
+    /// fire - losing just that one operation rather than every operation queued after it.
+    /// </summary>
+    private void RunGattOpOrAdvance(Func<bool> op, string description)
+    {
+        bool accepted = op();
+        if (!accepted)
+        {
+            Log.Warn(LogTag, $"GATT stack rejected {description} (returned false); skipping and advancing the queue.");
+            RunNext();
+        }
     }
 
     private void Enqueue(Action operation)

@@ -76,7 +76,13 @@ public class ScaleScanReceiver : BroadcastReceiver
             return;
         }
 
-        ScanCooldownStore.RecordAttempt(context, DateTimeOffset.UtcNow);
+        // Only a short placeholder here - ScaleConnectionService itself records the real,
+        // outcome-based cooldown (short after a real failure, full 5 minutes after a success or
+        // a genuine "not stepped on" timeout) once it knows what actually happened. See
+        // ScanCooldownStore for why: recording the full cooldown unconditionally here, before the
+        // sync even starts, previously meant a captured-but-failed-to-record weigh-in silently
+        // blocked the user's obvious recovery action (stepping on the scale again) for 5 minutes.
+        ScanCooldownStore.RecordInFlight(context);
 
         Log.Info(LogTag, $"Scale advertisement matched: {device.Address}. Starting connection service.");
 
@@ -114,6 +120,12 @@ public class ScaleScanReceiver : BroadcastReceiver
             CrashLog.Record(context, ex);
             StatusStore.RecordError(context, $"{ex.GetType().Name}: blocked from starting in the background - open ScaleBridge to sync manually.", DateTimeOffset.UtcNow);
             SyncNotifier.PostError(context, "Scale detected but background sync was blocked by Android this time - open ScaleBridge to sync manually.");
+
+            // The service never started, so it will never record its own outcome-based cooldown -
+            // apply the short failure cooldown ourselves so a subsequent step-on-the-scale (or
+            // simply reopening the app, which satisfies the foreground-service-start gate) isn't
+            // blocked for the full success-length cooldown.
+            ScanCooldownStore.RecordFailureOutcome(context);
         }
     }
 }

@@ -49,6 +49,7 @@ public class ScaleConnectionService : Service
         if (string.IsNullOrEmpty(address))
         {
             Log.Warn(LogTag, "Started with no device address; stopping.");
+            ScanCooldownStore.RecordFailureOutcome(this);
             StopSelfSafely();
             return StartCommandResult.NotSticky;
         }
@@ -143,6 +144,7 @@ public class ScaleConnectionService : Service
                 WeightHistoryStore.RecordSynced(this, weightKg, whenUtc);
                 SyncNotifier.PostSuccess(this, weightKg, whenUtc.ToLocalTime());
                 Log.Info(LogTag, $"Wrote {weightKg:0.0} kg to Health Connect.");
+                ScanCooldownStore.RecordSuccessOutcome(this);
             }
             catch (Exception ex)
             {
@@ -181,6 +183,11 @@ public class ScaleConnectionService : Service
                     permissionRevoked
                         ? $"Captured {weightKg:0.0} kg but Health Connect write permission was revoked. Open ScaleBridge and re-grant it, then retry from the app."
                         : $"Captured {weightKg:0.0} kg but Health Connect write failed: {shortDetail}. Saved - retry from the app.");
+
+                // A real failure with a weight actually captured - the user's obvious recovery
+                // action is to step back on the scale, so use the short cooldown rather than the
+                // full 5-minute one (see ScanCooldownStore).
+                ScanCooldownStore.RecordFailureOutcome(this);
             }
             finally
             {
@@ -202,6 +209,13 @@ public class ScaleConnectionService : Service
         // informational rather than surfaced as an error notification.
         _finished = true;
         Log.Info(LogTag, "Scale disconnected before a stable weight was captured.");
+
+        // Treated as a real failure rather than the long "idle scale" cooldown: an
+        // advertisement that got far enough to open a connection and then dropped before a
+        // weight was captured (as opposed to never producing any vendor data at all, see
+        // FailAndStop's timeout handling) is more likely a flaky connection than a scale nobody
+        // stepped on, so a fast retry via stepping on the scale again should be allowed.
+        ScanCooldownStore.RecordFailureOutcome(this);
         StopSelfSafely();
     }
 
@@ -217,6 +231,15 @@ public class ScaleConnectionService : Service
             StatusStore.RecordError(this, message, DateTimeOffset.UtcNow);
             SyncNotifier.PostError(this, message);
         }
+
+        // isError distinguishes a real failure (short cooldown, so stepping on the scale again
+        // actually retries) from the genuine "scale was never stepped on" timeout (long cooldown,
+        // same as a success - this is the original idle-advertising-scale case ScanCooldownStore
+        // exists to guard against). See ScanCooldownStore for the full rationale.
+        if (isError)
+            ScanCooldownStore.RecordFailureOutcome(this);
+        else
+            ScanCooldownStore.RecordSuccessOutcome(this);
 
         Disconnect();
         StopSelfSafely();
